@@ -1,158 +1,274 @@
 import { describe, expect, it } from 'vitest';
-import { decide, readAnnotation, resolvePolicy, type PermissionMode } from '../../src/policy/index.js';
+import {
+  authSatisfied,
+  readAnnotation,
+  readAuthGate,
+  resolvePolicy,
+  tighterGate,
+  toExposure,
+  type ToolExposure
+} from '../../src/policy/index.js';
 
 const read = { readOnly: true };
 const write = { readOnly: false };
 
-describe('permission modes', () => {
-  it('reduces each mode to a decision about one operation', () => {
-    const cases: Array<[PermissionMode, boolean, string]> = [
-      ['no-prompt', true, 'allow'],
-      ['no-prompt', false, 'allow'],
-      ['ask-for-edits', true, 'allow'],
-      ['ask-for-edits', false, 'confirm'],
-      ['ask-first', true, 'confirm'],
-      ['ask-first', false, 'confirm'],
-      ['read-only', true, 'allow'],
-      ['read-only', false, 'block'],
-      ['deny', true, 'block'],
-      ['deny', false, 'block']
-    ];
-    for (const [mode, readOnly, expected] of cases) {
-      expect(`${mode}/${readOnly}: ${decide(mode, readOnly)}`).toBe(`${mode}/${readOnly}: ${expected}`);
+describe('exposure levels', () => {
+  it('accepts exactly read, write, and hidden', () => {
+    expect(toExposure('read')).toBe('read');
+    expect(toExposure('write')).toBe('write');
+    expect(toExposure('hidden')).toBe('hidden');
+  });
+
+  it('has no legacy aliases: the old permission lattice is gone', () => {
+    for (const legacy of ['no-prompt', 'ask-for-edits', 'ask-first', 'read-only', 'deny', 'allow', 'confirm', 'block']) {
+      expect(toExposure(legacy)).toBeUndefined();
     }
+    expect(toExposure('allow-everything')).toBeUndefined();
+    expect(toExposure('')).toBeUndefined();
+    expect(toExposure(42)).toBeUndefined();
+    expect(toExposure(undefined)).toBeUndefined();
   });
 });
 
 describe('x-webmcp annotation parsing', () => {
-  it('keeps only values this version understands', () => {
-    expect(readAnnotation({ policy: 'ask-first', destructive: true, reason: '  needs care  ' })).toEqual({
-      policy: 'ask-first',
-      destructive: true,
-      reason: 'needs care'
+  it('reads tool levels, auth gates, and destructive flags', () => {
+    expect(readAnnotation({ tool: 'write', destructive: true })).toEqual({ tool: 'write', destructive: true });
+    expect(readAnnotation({ tool: 'read' })).toEqual({ tool: 'read' });
+    expect(readAnnotation({ tool: 'hidden' })).toEqual({ tool: 'hidden' });
+    expect(readAnnotation({ destructive: true })).toEqual({ destructive: true });
+    expect(readAnnotation({ tool: 'read', requiresAuth: 'bearerAuth' })).toEqual({
+      tool: 'read',
+      requiresAuth: { any: false, schemes: ['bearerAuth'] }
     });
   });
 
-  it('drops unknown, malformed and non-object annotations rather than guessing', () => {
-    expect(readAnnotation({ policy: 'allow-everything' })).toBeUndefined();
-    expect(readAnnotation({ policy: 42 })).toBeUndefined();
-    expect(readAnnotation({ destructive: 'yes' })).toBeUndefined();
-    expect(readAnnotation('read-only')).toBeUndefined();
-    expect(readAnnotation(['no-prompt'])).toBeUndefined();
-    expect(readAnnotation(null)).toBeUndefined();
+  it('ignores every legacy key: policy, agent, reason, and old mode names', () => {
+    expect(readAnnotation({ policy: 'deny' })).toBeUndefined();
+    expect(readAnnotation({ policy: 'read-only' })).toBeUndefined();
+    expect(readAnnotation({ agent: 'write' })).toBeUndefined();
+    expect(readAnnotation({ tool: 'write', reason: 'Because.' })).toEqual({ tool: 'write' });
+    expect(readAnnotation({ tool: 'allow' })).toBeUndefined();
   });
 
-  it('bounds publisher prose', () => {
-    const annotation = readAnnotation({ reason: 'x'.repeat(1000) });
-    expect(annotation?.reason?.length).toBe(240);
+  it('drops malformed values rather than guessing', () => {
+    expect(readAnnotation({ tool: 'sometimes' })).toBeUndefined();
+    expect(readAnnotation({ tool: 42 })).toBeUndefined();
+    expect(readAnnotation({ destructive: 'yes' })).toBeUndefined();
+    expect(readAnnotation('read')).toBeUndefined();
+    expect(readAnnotation(['write'])).toBeUndefined();
+    expect(readAnnotation(null)).toBeUndefined();
   });
 });
 
-describe('untrusted documents may only tighten policy', () => {
-  it('lets an annotation raise the requirement above the page default', () => {
-    const policy = resolvePolicy({
-      pageMode: 'no-prompt',
-      operation: { policy: 'ask-first' },
-      ...write
-    });
-    expect(policy.decision).toBe('confirm');
+describe('requiresAuth parsing', () => {
+  it('accepts true, one scheme, or a list of schemes', () => {
+    expect(readAuthGate(true)).toEqual({ any: true, schemes: [] });
+    expect(readAuthGate('bearerAuth')).toEqual({ any: false, schemes: ['bearerAuth'] });
+    expect(readAuthGate(['bearerAuth', 'waypointKey'])).toEqual({ any: false, schemes: ['bearerAuth', 'waypointKey'] });
+  });
+
+  it('drops anything else', () => {
+    expect(readAuthGate(false)).toBeUndefined();
+    expect(readAuthGate('')).toBeUndefined();
+    expect(readAuthGate([])).toBeUndefined();
+    expect(readAuthGate([42])).toBeUndefined();
+    expect(readAuthGate(42)).toBeUndefined();
+    expect(readAuthGate(undefined)).toBeUndefined();
+  });
+
+  it('checks several names as ANY of them, mirroring OpenAPI security alternatives', () => {
+    const gate = readAuthGate(['bearerAuth', 'waypointKey'])!;
+    expect(authSatisfied(gate, [])).toBe(false);
+    expect(authSatisfied(gate, ['other'])).toBe(false);
+    expect(authSatisfied(gate, ['waypointKey'])).toBe(true);
+    expect(authSatisfied(readAuthGate(true)!, [])).toBe(false);
+    expect(authSatisfied(readAuthGate(true)!, ['anything'])).toBe(true);
+    expect(authSatisfied(undefined, [])).toBe(true);
+  });
+});
+
+describe('untrusted documents may only tighten exposure', () => {
+  it('lets an annotation hold an operation below the page default', () => {
+    const policy = resolvePolicy({ pageExposure: 'write', operation: { tool: 'read' }, ...write });
+    expect(policy.exposure).toBe('read');
+    expect(policy.blocked).toBe(true);
     expect(policy.source).toBe('document');
   });
 
-  it('ignores an annotation that would weaken the page default', () => {
-    const policy = resolvePolicy({
-      pageMode: 'ask-first',
-      operation: { policy: 'no-prompt' },
-      ...write
-    });
-    expect(policy.decision).toBe('confirm');
+  it('ignores an annotation that would loosen the page default', () => {
+    const policy = resolvePolicy({ pageExposure: 'read', operation: { tool: 'write' }, ...write });
+    expect(policy.exposure).toBe('read');
+    expect(policy.blocked).toBe(true);
     expect(policy.source).toBe('page');
   });
 
-  it('cannot re-enable writes under a read-only page', () => {
-    for (const attempt of ['no-prompt', 'ask-for-edits', 'ask-first'] as PermissionMode[]) {
-      const policy = resolvePolicy({ pageMode: 'read-only', operation: { policy: attempt }, ...write });
-      expect(policy.decision).toBe('block');
-    }
+  it('exposes a write when both the page and the document agree', () => {
+    const policy = resolvePolicy({ pageExposure: 'write', operation: { tool: 'write' }, ...write });
+    expect(policy.exposure).toBe('write');
+    expect(policy.blocked).toBe(false);
+    expect(policy.hidden).toBe(false);
   });
 
   it('honours the document default when the operation says nothing', () => {
+    const policy = resolvePolicy({ pageExposure: 'write', documentDefault: { tool: 'read' }, ...write });
+    expect(policy.exposure).toBe('read');
+    expect(policy.source).toBe('document');
+  });
+
+  it('never blocks a read: held at read is exactly what a read needs', () => {
+    const policy = resolvePolicy({ pageExposure: 'read', operation: { tool: 'read' }, ...read });
+    expect(policy.exposure).toBe('read');
+    expect(policy.blocked).toBe(false);
+  });
+});
+
+describe('requiresAuth resolution', () => {
+  it('prefers the operation gate over the document default', () => {
     const policy = resolvePolicy({
-      pageMode: 'no-prompt',
-      documentDefault: { policy: 'ask-first' },
+      pageExposure: 'write',
+      documentDefault: { requiresAuth: { any: true, schemes: [] } },
+      operation: { requiresAuth: { any: false, schemes: ['bearerAuth'] } },
       ...read
     });
-    expect(policy.decision).toBe('confirm');
+    expect(policy.requiresAuth).toEqual({ any: false, schemes: ['bearerAuth'] });
+  });
+
+  it('falls back to the document default when the operation says nothing', () => {
+    const policy = resolvePolicy({
+      pageExposure: 'write',
+      documentDefault: { requiresAuth: { any: false, schemes: ['waypointKey'] } },
+      ...read
+    });
+    expect(policy.requiresAuth).toEqual({ any: false, schemes: ['waypointKey'] });
+  });
+
+  it('leaves ungated operations ungated', () => {
+    expect(resolvePolicy({ pageExposure: 'write', ...read }).requiresAuth).toBeUndefined();
   });
 });
 
 describe('trusted documents', () => {
-  it('let the publisher relax the page default once trust is opted into', () => {
+  it('let the publisher raise the page default once trust is opted into', () => {
     const policy = resolvePolicy({
-      pageMode: 'ask-for-edits',
-      operation: { policy: 'no-prompt' },
+      pageExposure: 'read',
+      operation: { tool: 'write' },
       trustSpecAnnotations: true,
       ...write
     });
-    expect(policy.decision).toBe('allow');
+    expect(policy.exposure).toBe('write');
     expect(policy.source).toBe('document');
   });
 
   it('still fall back to the page default for unannotated operations', () => {
-    const policy = resolvePolicy({ pageMode: 'ask-for-edits', trustSpecAnnotations: true, ...write });
-    expect(policy.decision).toBe('confirm');
+    const policy = resolvePolicy({ pageExposure: 'read', trustSpecAnnotations: true, ...write });
+    expect(policy.exposure).toBe('read');
     expect(policy.source).toBe('page');
   });
 });
 
-describe('refusals and destructive operations', () => {
-  it('treats deny as a withdrawal from the capability set under either trust setting', () => {
+describe('hidden and the kill switch', () => {
+  it('treats hidden as a withdrawal from the capability set under either trust setting', () => {
     for (const trustSpecAnnotations of [false, true]) {
       const policy = resolvePolicy({
-        pageMode: 'no-prompt',
-        operation: { policy: 'deny' },
+        pageExposure: 'write',
+        operation: { tool: 'hidden' },
         trustSpecAnnotations,
         ...read
       });
-      expect(policy.decision).toBe('block');
+      expect(policy.exposure).toBe('hidden');
       expect(policy.hidden).toBe(true);
     }
   });
 
-  it('treats a page mode of deny as an absolute kill switch', () => {
+  it('treats a page exposure of hidden as an absolute kill switch', () => {
     for (const trustSpecAnnotations of [false, true]) {
-      for (const attempt of ['no-prompt', 'ask-for-edits', 'ask-first'] as PermissionMode[]) {
+      for (const attempt of ['read', 'write'] as ToolExposure[]) {
         const policy = resolvePolicy({
-          pageMode: 'deny',
-          operation: { policy: attempt },
+          pageExposure: 'hidden',
+          operation: { tool: attempt },
           trustSpecAnnotations,
           ...read
         });
-        expect(policy.decision).toBe('block');
+        expect(policy.exposure).toBe('hidden');
         expect(policy.hidden).toBe(true);
+        expect(policy.source).toBe('page');
       }
     }
   });
+});
 
-  it('never lets a destructive operation run silently, even on a trusted no-prompt document', () => {
+describe('tighterGate', () => {
+  const any = { any: true, schemes: [] as string[] };
+  const bearer = { any: false, schemes: ['bearerAuth'] };
+  const either = { any: false, schemes: ['bearerAuth', 'waypointKey'] };
+
+  it('orders no gate below any-auth below named schemes', () => {
+    expect(tighterGate(undefined, any)).toEqual(any);
+    expect(tighterGate(any, bearer)).toEqual(bearer);
+    expect(tighterGate(bearer, any)).toEqual(bearer);
+  });
+
+  it('treats a scheme subset as tighter', () => {
+    expect(tighterGate(either, bearer)).toEqual(bearer);
+    expect(tighterGate(bearer, either)).toEqual(bearer);
+  });
+
+  it('keeps the document gate when the resolver names something incomparable', () => {
+    const key = { any: false, schemes: ['waypointKey'] };
+    expect(tighterGate(bearer, key)).toEqual(bearer);
+  });
+});
+
+describe('page-supplied policy resolvers', () => {
+  it('may only tighten what the other sources produced', () => {
+    const tightened = resolvePolicy({ pageExposure: 'write', operation: { tool: 'write' }, resolver: { tool: 'read' }, ...write });
+    expect(tightened.exposure).toBe('read');
+    expect(tightened.blocked).toBe(true);
+    expect(tightened.source).toBe('page');
+
+    const ignored = resolvePolicy({ pageExposure: 'write', resolver: { tool: 'write' }, ...read });
+    expect(ignored.exposure).toBe('write');
+  });
+
+  it('can hide an operation entirely, even one the document exposed', () => {
     const policy = resolvePolicy({
-      pageMode: 'no-prompt',
-      operation: { policy: 'no-prompt', destructive: true },
+      pageExposure: 'write',
+      operation: { tool: 'write' },
+      resolver: { tool: 'hidden' },
       trustSpecAnnotations: true,
       ...write
     });
-    expect(policy.decision).toBe('confirm');
-    expect(policy.destructive).toBe(true);
-    expect(policy.source).toBe('destructive');
+    expect(policy.hidden).toBe(true);
   });
 
-  it('carries publisher prose for the consent card without altering the decision', () => {
-    const policy = resolvePolicy({
-      pageMode: 'ask-for-edits',
-      operation: { reason: 'Deletes production data.' },
-      ...write
+  it('can add the destructive signal', () => {
+    const policy = resolvePolicy({ pageExposure: 'write', resolver: { destructive: true }, ...write });
+    expect(policy.destructive).toBe(true);
+  });
+
+  it('can add an auth gate, but never loosen the document one', () => {
+    const added = resolvePolicy({
+      pageExposure: 'write',
+      operation: { tool: 'read' },
+      resolver: { requiresAuth: { any: true, schemes: [] } },
+      ...read
     });
-    expect(policy.reason).toBe('Deletes production data.');
-    expect(policy.decision).toBe('confirm');
+    expect(added.requiresAuth).toEqual({ any: true, schemes: [] });
+
+    const kept = resolvePolicy({
+      pageExposure: 'write',
+      operation: { tool: 'read', requiresAuth: { any: false, schemes: ['bearerAuth'] } },
+      resolver: { requiresAuth: { any: true, schemes: [] } },
+      ...read
+    });
+    expect(kept.requiresAuth).toEqual({ any: false, schemes: ['bearerAuth'] });
+  });
+});
+
+describe('destructive operations', () => {
+  it('ORs the destructive flag across document root, operation, and resolver', () => {
+    expect(resolvePolicy({ pageExposure: 'write', documentDefault: { destructive: true }, ...write }).destructive).toBe(true);
+    expect(resolvePolicy({ pageExposure: 'write', operation: { destructive: true }, ...write }).destructive).toBe(true);
+    expect(resolvePolicy({ pageExposure: 'write', ...write }).destructive).toBe(false);
   });
 });

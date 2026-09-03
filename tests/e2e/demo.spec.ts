@@ -28,9 +28,21 @@ async function withWebMcp(page: Page) {
 
 const toolNames = (page: Page) => page.evaluate(() => [...(window as any).__webmcpTools.keys()]);
 
+async function webmcpReady(page: Page) {
+  await page.waitForFunction(() => (window as any).__webmcpTools?.has('openapi_search_operations'), null, {
+    timeout: 15000
+  });
+}
+
 async function signIn(page: Page) {
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.locator('#session')).toContainText('dev@waypoint.local');
+}
+
+async function signInWithWebmcp(page: Page) {
+  await signIn(page);
+  // Signing in reloads the page, so the capability set is re-registered.
+  await webmcpReady(page);
 }
 
 /** The demo store is per server process, so tests reseed it to stay independent. */
@@ -39,7 +51,39 @@ async function resetDemoData(page: Page) {
   expect(response.status()).toBe(200);
 }
 
-const console_ = (page: Page) => page.locator('[data-swagger-webmcp-status]');
+const DEMO_TOKENS = {
+  bearerAuth: 'waypoint-demo-bearer',
+  waypointKey: 'waypoint-demo-key',
+  waypointQueryKey: 'waypoint-demo-query-key'
+} as const;
+
+/** Authorize one scheme through Swagger UI's own authorize dialog. */
+async function authorizeScheme(page: Page, scheme: keyof typeof DEMO_TOKENS) {
+  await page.locator('.auth-wrapper .authorize').first().click();
+  const container = page.locator('.auth-container', { has: page.locator(`h4 code:text-is("${scheme}")`) });
+  await expect(container).toBeVisible();
+  await container.locator('input').fill(DEMO_TOKENS[scheme]);
+  // The submit button's aria-label ("Apply credentials") overrides its text.
+  await container.locator('button.authorize').click();
+  await expect(container.locator('button:has-text("Logout")')).toBeVisible();
+  await page.locator('.dialog-ux .close-modal').click();
+}
+
+/** Revoke one scheme through Swagger UI's own authorize dialog. */
+async function logoutScheme(page: Page, scheme: keyof typeof DEMO_TOKENS) {
+  await page.locator('.auth-wrapper .authorize').first().click();
+  const container = page.locator('.auth-container', { has: page.locator(`h4 code:text-is("${scheme}")`) });
+  await container.locator('button:has-text("Logout")').click();
+  await expect(container.locator('button.authorize')).toBeVisible();
+  await page.locator('.dialog-ux .close-modal').click();
+}
+
+async function agentExecute(page: Page, name: string, input: any) {
+  return page.evaluate(
+    ([toolName, args]) => (window as any).__webmcpTools.get(toolName).execute(args, {}),
+    [name, input] as const
+  );
+}
 
 test.describe('Swagger UI without WebMCP', () => {
   test('remains an ordinary, fully usable documentation page', async ({ page }) => {
@@ -84,8 +128,7 @@ test.describe('WebMCP capability set', () => {
 
   test('registers the stable tools and one tool per eligible operation', async ({ page }) => {
     await page.goto('/');
-    await expect(console_(page)).toContainText('WebMCP');
-    await expect(console_(page)).toContainText('tools');
+    await webmcpReady(page);
 
     const names = await toolNames(page);
     expect(names).toEqual(
@@ -101,9 +144,45 @@ test.describe('WebMCP capability set', () => {
     expect(names.some((name: string) => name.startsWith('api.createTask.'))).toBe(true);
   });
 
-  test('withholds operations the document marks deny, everywhere', async ({ page }) => {
+  test('ships no agent-only UI: nothing exists solely for agents', async ({ page }) => {
     await page.goto('/');
-    await expect(console_(page)).toContainText('tools');
+    await webmcpReady(page);
+
+    // The consent-era console is gone: no shadow-DOM panel, no consent cards,
+    // no session memory controls. Agent activity surfaces through Swagger
+    // UI's own response panels instead.
+    expect(await page.locator('[data-swagger-webmcp-status]').count()).toBe(0);
+    expect(await page.locator('.consent').count()).toBe(0);
+  });
+
+  test('registers tools with honest MCP annotations', async ({ page }) => {
+    await page.goto('/');
+    await webmcpReady(page);
+
+    const annotations = await page.evaluate(() => {
+      const tools = (window as any).__webmcpTools as Map<string, any>;
+      const pick = (prefix: string) => tools.get([...tools.keys()].find((n) => n.startsWith(prefix))!);
+      return {
+        read: pick('api.listProjects.').annotations,
+        write: pick('api.createTask.').annotations,
+        destructive: pick('api.deleteProject.').annotations,
+        batch: tools.get('openapi_execute_batch').annotations
+      };
+    });
+
+    expect(annotations.read).toEqual({ readOnlyHint: true, destructiveHint: false, untrustedContentHint: true });
+    expect(annotations.write).toEqual({ readOnlyHint: false, destructiveHint: false, untrustedContentHint: true });
+    expect(annotations.destructive).toEqual({
+      readOnlyHint: false,
+      destructiveHint: true,
+      untrustedContentHint: true
+    });
+    expect(annotations.batch).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+  });
+
+  test('withholds operations the document marks hidden, everywhere', async ({ page }) => {
+    await page.goto('/');
+    await webmcpReady(page);
 
     const names = await toolNames(page);
     expect(names.some((name: string) => name.startsWith('api.createCharge.'))).toBe(false);
@@ -122,14 +201,34 @@ test.describe('WebMCP capability set', () => {
     expect(attempt.error.code).toBe('OPERATION_NOT_FOUND');
 
     // Still reachable by a signed-in human through normal Swagger UI.
-    await signIn(page);
+    await signInWithWebmcp(page);
     const direct = await page.request.post('/api/sandbox/billing/charges', { data: { amountCents: 500 } });
     expect(direct.status()).toBe(201);
   });
 
+  test('keeps a held write visible but not callable', async ({ page }) => {
+    await page.goto('/');
+    await webmcpReady(page);
+
+    const detail = await page.evaluate(async () => {
+      const tool = (window as any).__webmcpTools.get('openapi_get_operation');
+      return tool.execute({ operation: 'bulkUpdateTasks' }, {});
+    });
+    expect(detail.agentPolicy).toMatchObject({ exposure: 'read', callable: false });
+
+    const names = await toolNames(page);
+    expect(names.some((name: string) => name.startsWith('api.bulkUpdateTasks.'))).toBe(false);
+
+    const attempt = await page.evaluate(async () => {
+      const tool = (window as any).__webmcpTools.get('openapi_execute_operation');
+      return tool.execute({ operation: 'bulkUpdateTasks', body: { operations: [] } }, {});
+    });
+    expect(attempt.error.code).toBe('READ_ONLY_MODE');
+  });
+
   test('excludes binary uploads from direct tools but explains why', async ({ page }) => {
     await page.goto('/');
-    await expect(console_(page)).toContainText('tools');
+    await webmcpReady(page);
 
     const names = await toolNames(page);
     expect(names.some((name: string) => name.startsWith('api.uploadProjectAttachment.'))).toBe(false);
@@ -144,7 +243,7 @@ test.describe('WebMCP capability set', () => {
 
   test('falls back to discovery only when a document exceeds the tool cap', async ({ page }) => {
     await page.goto('/?maxTools=5');
-    await expect(console_(page)).toContainText('tools');
+    await webmcpReady(page);
 
     const names = await toolNames(page);
     expect(names.some((name: string) => name.startsWith('api.'))).toBe(false);
@@ -158,17 +257,112 @@ test.describe('WebMCP capability set', () => {
   });
 });
 
-test.describe('Human approval', () => {
+test.describe('SEE vs CALL through Swagger auth UI', () => {
   test.beforeEach(async ({ page }) => {
     await withWebMcp(page);
     await page.goto('/');
-    await expect(console_(page)).toContainText('tools');
-    await signIn(page);
-    await resetDemoData(page);
-    await expect(console_(page)).toContainText('tools');
+    await webmcpReady(page);
   });
 
-  test('runs a publisher-waived write with no prompt and logs it', async ({ page }) => {
+  test('bearer: listed while signed out, AUTH_REQUIRED, then 200 after authorizing', async ({ page }) => {
+    const search = await page.evaluate(async () => {
+      const tool = (window as any).__webmcpTools.get('openapi_search_operations');
+      return tool.execute({ query: 'usage report' }, {});
+    });
+    const usage = search.operations.find((op: any) => op.operationId === 'getUsageReport');
+    expect(usage.agentPolicy).toMatchObject({ requiresAuth: ['bearerAuth'], authorized: false, callable: false });
+
+    const before = await agentExecute(page, 'openapi_execute_operation', { operation: 'getUsageReport' });
+    expect(before.error.code).toBe('AUTH_REQUIRED');
+
+    await authorizeScheme(page, 'bearerAuth');
+
+    const after = await agentExecute(page, 'openapi_execute_operation', { operation: 'getUsageReport' });
+    expect(after.ok).toBe(true);
+    expect(after.response.status).toBe(200);
+    expect(after.displayedInSwaggerUi).toBe(true);
+  });
+
+  test('header key: agent creates an export only after the human authorizes', async ({ page }) => {
+    const before = await agentExecute(page, 'openapi_execute_operation', {
+      operation: 'createExport',
+      body: { format: 'json', scope: 'projects' }
+    });
+    expect(before.error.code).toBe('AUTH_REQUIRED');
+
+    await authorizeScheme(page, 'waypointKey');
+
+    const after = await agentExecute(page, 'openapi_execute_operation', {
+      operation: 'createExport',
+      body: { format: 'json', scope: 'projects' }
+    });
+    expect(after.ok).toBe(true);
+    expect(after.response.status).toBe(202);
+    expect(after.displayedInSwaggerUi).toBe(true);
+  });
+
+  test('query key: export status polls only after its own scheme is authorized', async ({ page }) => {
+    await authorizeScheme(page, 'waypointKey');
+    const created = await agentExecute(page, 'openapi_execute_operation', {
+      operation: 'createExport',
+      body: { format: 'json', scope: 'projects' }
+    });
+    expect(created.ok).toBe(true);
+    const jobId = created.response.body.id as string;
+
+    const before = await agentExecute(page, 'openapi_execute_operation', {
+      operation: 'getExport',
+      path: { jobId }
+    });
+    expect(before.error.code).toBe('AUTH_REQUIRED');
+
+    await authorizeScheme(page, 'waypointQueryKey');
+
+    const after = await agentExecute(page, 'openapi_execute_operation', {
+      operation: 'getExport',
+      path: { jobId }
+    });
+    expect(after.ok).toBe(true);
+    expect(after.response.status).toBe(200);
+    expect(after.response.body.id).toBe(jobId);
+  });
+
+  test('revoking in Swagger UI flips the same call back to AUTH_REQUIRED', async ({ page }) => {
+    await authorizeScheme(page, 'bearerAuth');
+    const authed = await agentExecute(page, 'openapi_execute_operation', { operation: 'getUsageReport' });
+    expect(authed.ok).toBe(true);
+
+    await logoutScheme(page, 'bearerAuth');
+
+    const revoked = await agentExecute(page, 'openapi_execute_operation', { operation: 'getUsageReport' });
+    expect(revoked.error.code).toBe('AUTH_REQUIRED');
+  });
+
+  test('direct tools enforce the live gate too', async ({ page }) => {
+    const name = await page.evaluate(() => (window as any).__findTool('api.getUsageReport.'));
+    expect(name).toBeTruthy();
+
+    const before = await agentExecute(page, name, {});
+    expect(before.error.code).toBe('AUTH_REQUIRED');
+
+    await authorizeScheme(page, 'bearerAuth');
+
+    const after = await agentExecute(page, name, {});
+    expect(after.ok).toBe(true);
+    expect(after.response.status).toBe(200);
+  });
+});
+
+test.describe('Shared state, no prompts', () => {
+  test.beforeEach(async ({ page }) => {
+    await withWebMcp(page);
+    await page.goto('/');
+    await webmcpReady(page);
+    await signInWithWebmcp(page);
+    await resetDemoData(page);
+  });
+
+  test('runs reads and writes with no prompt and receipts in Swagger UI', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const name = (window as any).__findTool('api.createTask.');
       const tool = (window as any).__webmcpTools.get(name);
@@ -177,86 +371,7 @@ test.describe('Human approval', () => {
 
     expect(result.ok).toBe(true);
     expect(result.response.status).toBe(201);
-    await expect(console_(page).locator('.log li').first()).toContainText('POST /projects/{projectId}/tasks');
-  });
-
-  test('stops an ungated write on a consent card and runs it once approved', async ({ page }) => {
-    await page.evaluate(() => {
-      const name = (window as any).__findTool('api.createProject.');
-      return (window as any).__invoke(name, { body: { name: 'Agent proposed project', priority: 'high' } });
-    });
-
-    const card = console_(page).locator('.consent');
-    await expect(card).toBeVisible();
-    await expect(card.locator('h4')).toContainText('POST /projects');
-    await expect(card).toContainText('Body fields: name, priority');
-
-    await card.getByRole('button', { name: 'Allow once' }).click();
-
-    const result = await page.evaluate(() => (window as any).__result);
-    expect(result.ok).toBe(true);
-    expect(result.response.status).toBe(201);
-    await expect(card).toHaveCount(0);
-  });
-
-  test('never touches the API when a person denies', async ({ page }) => {
-    const before = await page.request.get('/api/sandbox/projects');
-    const countBefore = (await before.json()).pagination.total;
-
-    await page.evaluate(() => {
-      const name = (window as any).__findTool('api.createProject.');
-      return (window as any).__invoke(name, { body: { name: 'Should never exist' } });
-    });
-
-    await console_(page).locator('.consent').getByRole('button', { name: 'Deny' }).click();
-
-    const result = await page.evaluate(() => (window as any).__result);
-    expect(result.error.code).toBe('PERMISSION_REQUIRED');
-
-    const after = await page.request.get('/api/sandbox/projects');
-    expect((await after.json()).pagination.total).toBe(countBefore);
-  });
-
-  test('shows the publisher reason and refuses to remember a destructive call', async ({ page }) => {
-    await page.evaluate(() => {
-      const name = (window as any).__findTool('api.deleteProject.');
-      return (window as any).__invoke(name, { path: { projectId: 'prj_delta' } });
-    });
-
-    const card = console_(page).locator('.consent');
-    await expect(card).toContainText('Permanently removes a project');
-    await expect(card).toContainText('Stated by the API document');
-    await expect(card.locator('.badge')).toHaveText('destructive');
-    await expect(card.getByRole('button', { name: 'Always allow' })).toHaveCount(0);
-
-    await card.getByRole('button', { name: 'Deny' }).click();
-  });
-
-  test('asks once for a batch and applies every step in order', async ({ page }) => {
-    await page.evaluate(() => {
-      const tool = (window as any).__webmcpTools.get('openapi_execute_batch');
-      (window as any).__result = tool.execute(
-        {
-          steps: [
-            { operation: 'createProject', body: { name: 'Q3 Launch', priority: 'high' } },
-            { operation: 'listProjects', query: { q: 'Q3 Launch' } }
-          ]
-        },
-        {}
-      );
-      return true;
-    });
-
-    const card = console_(page).locator('.consent');
-    await expect(card.locator('h4')).toContainText('Batch · 2 operations');
-    await expect(card).toContainText('1. POST /projects');
-    await expect(card).toContainText('2. GET /projects');
-
-    await card.getByRole('button', { name: 'Allow once' }).click();
-
-    const result = await page.evaluate(() => (window as any).__result);
-    expect(result.succeeded).toBe(2);
-    expect(result.results[1].response.body.projects[0].name).toBe('Q3 Launch');
+    expect(result.displayedInSwaggerUi).toBe(true);
   });
 
   test('marks agent-driven writes in the audit log', async ({ page }) => {
@@ -273,6 +388,37 @@ test.describe('Human approval', () => {
       return response.json();
     });
     expect(events.events[0]).toMatchObject({ action: 'task.created', source: 'webmcp-agent' });
+  });
+
+  test('runs a batch with no approval stop and refuses a bad plan whole', async ({ page }) => {
+    const good = await agentExecute(page, 'openapi_execute_batch', {
+      steps: [
+        { operation: 'createProject', body: { name: 'Q3 Launch', priority: 'high' } },
+        { operation: 'listProjects', query: { q: 'Q3 Launch' } }
+      ]
+    });
+    expect(good.succeeded).toBe(2);
+    expect(good.results[1].response.body.projects[0].name).toBe('Q3 Launch');
+
+    const countBefore = good.results[1].response.body.pagination.total;
+
+    const bad = await agentExecute(page, 'openapi_execute_batch', {
+      steps: [
+        { operation: 'createProject', body: { name: 'Should never exist' } },
+        { operation: 'createCharge', body: { amountCents: 1000 } }
+      ]
+    });
+    expect(bad.error.code).toBe('OPERATION_NOT_FOUND');
+
+    const after = await agentExecute(page, 'openapi_execute_operation', { operation: 'listProjects' });
+    expect(after.response.body.pagination.total).toBe(countBefore);
+  });
+
+  test('refuses a batch containing an unauthorized step before running anything', async ({ page }) => {
+    const result = await agentExecute(page, 'openapi_execute_batch', {
+      steps: [{ operation: 'listProjects' }, { operation: 'getUsageReport' }]
+    });
+    expect(result.error.code).toBe('AUTH_REQUIRED');
   });
 
   test('follows the server dropdown without re-registering tools', async ({ page }) => {
@@ -296,26 +442,18 @@ test.describe('Document-declared policy', () => {
   test('an unannotated copy of the same API falls back to the page default', async ({ page }) => {
     await withWebMcp(page);
     await page.goto('/?spec=/openapi-unannotated.yaml');
-    await expect(console_(page)).toContainText('tools');
-    await signIn(page);
+    await webmcpReady(page);
 
-    // Without `x-webmcp`, the operation the annotated document waived is gated again.
-    await page.evaluate(() => {
-      const name = (window as any).__findTool('api.createTask.');
-      return (window as any).__invoke(name, {
-        path: { projectId: 'prj_alpha' },
-        body: { title: 'Now needs approval', priority: 'low' }
-      });
-    });
-
-    const card = console_(page).locator('.consent');
-    await expect(card).toBeVisible();
-    await expect(card.locator('h4')).toContainText('POST /projects/{projectId}/tasks');
-
-    // And the operations the annotated document withheld are now merely gated.
+    // Without `x-webmcp`, nothing is hidden and nothing is held: the page
+    // default decides, and this page exposes writes.
     const names = await toolNames(page);
     expect(names.some((name: string) => name.startsWith('api.createCharge.'))).toBe(true);
+    expect(names.some((name: string) => name.startsWith('api.bulkUpdateTasks.'))).toBe(true);
 
-    await card.getByRole('button', { name: 'Deny' }).click();
+    const detail = await page.evaluate(async () => {
+      const tool = (window as any).__webmcpTools.get('openapi_get_operation');
+      return tool.execute({ operation: 'bulkUpdateTasks' }, {});
+    });
+    expect(detail.agentPolicy).toMatchObject({ callable: true, declaredIn: 'page' });
   });
 });

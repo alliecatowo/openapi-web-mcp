@@ -20,6 +20,8 @@ export interface FakeSwagger {
   requests: RecordedRequest[];
   /** Choose the response for the next execution. */
   respondWith: (response: { status: number; body?: unknown; headers?: Record<string, string> }) => void;
+  /** Mark schemes authorized, as Swagger UI's authorize dialog would. */
+  authorize: (...schemes: Array<{ name: string; type?: string } | string>) => void;
   system: any;
 }
 
@@ -51,6 +53,8 @@ export function fakeSwagger(spec: any, options: { withCredentials?: boolean } = 
     body: { ok: true },
     headers: { 'content-type': 'application/json' }
   };
+
+  let authorized: Record<string, { schema: { type: string } }> = {};
 
   const key = (path: string, method: string) => `${path}|${method}`;
 
@@ -138,7 +142,7 @@ export function fakeSwagger(spec: any, options: { withCredentials?: boolean } = 
       }
     },
     oas3Selectors: {},
-    authSelectors: { authorized: () => ({}) },
+    authSelectors: { authorized: () => authorized },
     getConfigs: () => ({ withCredentials: options.withCredentials ?? true })
   };
 
@@ -150,6 +154,13 @@ export function fakeSwagger(spec: any, options: { withCredentials?: boolean } = 
         body: response.body ?? {},
         headers: response.headers ?? { 'content-type': 'application/json' }
       };
+    },
+    authorize: (...schemes) => {
+      authorized = Object.fromEntries(
+        schemes.map((scheme) =>
+          typeof scheme === 'string' ? [scheme, { schema: { type: 'unknown' } }] : [scheme.name, { schema: { type: scheme.type ?? 'unknown' } }]
+        )
+      );
     },
     system
   };
