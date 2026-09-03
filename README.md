@@ -1,5 +1,26 @@
 # Swagger UI WebMCP
 
+<p align="center">
+  <img src="docs/media/hero.gif" alt="An agent attempts to delete a project while the operation is locked to read-only in Swagger UI; the agent's own chat panel reports that the delete tool was withheld and no request was sent." width="800">
+</p>
+
+<table align="center">
+<tr>
+<td width="33%" align="center">
+<img src="docs/media/screenshot-1.png" alt="Swagger UI operation panel for DELETE /projects/{projectId} with an Agent access dropdown set to Read only, right next to the Try it out button." width="100%"><br>
+<sub>Per-operation access control, set live next to <strong>Try it out</strong>.</sub>
+</td>
+<td width="33%" align="center">
+<img src="docs/media/screenshot-2.png" alt="Agent chat panel refusing to list projects because the page owner set GET /projects to Hidden for agents." width="100%"><br>
+<sub>A structural refusal — hidden operations don't exist for the agent.</sub>
+</td>
+<td width="33%" align="center">
+<img src="docs/media/screenshot-3.png" alt="Agent chat panel proposing an archive-then-delete plan and pausing for confirmation, next to Swagger UI's own live response panel." width="100%"><br>
+<sub>The agent proposes, pauses, and answers land in Swagger's own panel.</sub>
+</td>
+</tr>
+</table>
+
 > If you can Try it out, your agent can too.
 
 **A reusable Swagger UI plugin that turns any OpenAPI documentation page into a live, session-scoped agent interface — and splits the decision of what that agent may touch among the four parties who each know something different.**
@@ -143,7 +164,7 @@ Direct tools, the generic executor, and the batch executor all funnel through on
 
 **The page never prompts.** Permission UX belongs to the WebMCP client. The page's interface to the client is exactly three things: registration visibility, MCP annotations (`readOnlyHint`, `destructiveHint`, `untrustedContentHint`), and structured errors (`AUTH_REQUIRED`, `LOCKED`, `OPERATION_DENIED`, `READ_ONLY_MODE`).
 
-An earlier version of this plugin shipped a full in-page consent system — a shadow-DOM console, consent cards showing argument JSON, allow-once/allow-always. It was deleted. A page that prompts is a second policy engine competing with the client's, and the page's has less context. [docs/DECISIONS.md](docs/DECISIONS.md) records that removal, and the one part of it that was later reversed on purpose.
+An earlier version of this plugin shipped a full in-page consent system — a shadow-DOM console, consent cards showing argument JSON, allow-once/allow-always. It was deleted. A page that prompts is a second policy engine competing with the client's, and the page's has less context.
 
 ### Tools
 
@@ -218,7 +239,7 @@ tests/                unit suites + a Playwright e2e suite driven through a test
 
 The demo's local dev server and its deployed serverless function import the *same* router module, so the hosted and local demos cannot diverge.
 
-More detail: **[docs/architecture.md](docs/architecture.md)**. The reasoning behind each design decision, including the ones that were reversed: **[docs/DECISIONS.md](docs/DECISIONS.md)**.
+More detail: **[docs/architecture.md](docs/architecture.md)**.
 
 ## Security and limitations
 
@@ -265,8 +286,6 @@ CI runs all four on every push.
 2. Open your agent's tool panel. You should see exactly five stable tools — `openapi_get_context`, `openapi_search_operations`, `openapi_get_operation`, `openapi_execute_operation`, `openapi_execute_batch` — plus `api.<name>.<hash>` per exposed operation. **The hash differs per load; never hardcode it** — discover names via `openapi_search_operations` → `directTool`.
 3. Work through the recommended prompt above, then the by-hand variations (authorize, switch server, lock, hidden endpoint, swap document).
 4. Append `?maxTools=5` to the URL to force the large-document fallback: direct tools disappear, discovery plus generic execution remain.
-
-A complete, flow-by-flow external verification protocol — every call, its expected tool result, and the expected visible UI change — is in **[CODEX_DRIVER.md](CODEX_DRIVER.md)**.
 
 **Without a WebMCP-capable browser**, the same behaviour is covered end-to-end by the Playwright suite, which drives a test-only `modelContext` shim against the real page: `npm run test:e2e`. It asserts the capability set, honest annotations, hidden/held operations, all three `requiresAuth` gates and their revocation, locks (including that no tool input anywhere can set one), shared fields, batch atomicity, server switching, and audit fingerprinting in both directions.
 
