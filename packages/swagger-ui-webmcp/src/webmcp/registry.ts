@@ -118,7 +118,15 @@ export class WebMcpRegistry {
   /** Operations that get their own registered tool: visible, supported and callable. */
   private registrable(op: CompiledOperation): boolean {
     const policy = policyFor(op, this.gate);
-    return this.visible(op) && op.supported && !policy.blocked;
+    if (!this.visible(op) || !op.supported || policy.blocked) return false;
+    // `rebuild()` registers no direct tools at all once the document exceeds
+    // the cap (very large documents keep discovery and generic execution
+    // instead, so the capability set stays legible). `search()` and `get()`
+    // both report `directTool` through this method, so it has to agree with
+    // that all-or-nothing behavior — otherwise those tools would name a
+    // direct tool that was never actually registered.
+    const cap = this.settings().maxDirectOperationTools ?? DEFAULT_MAX_TOOLS;
+    return this.operations().length <= cap;
   }
 
   private describePolicy(op: CompiledOperation) {

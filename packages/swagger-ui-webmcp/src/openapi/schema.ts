@@ -1,4 +1,5 @@
 import { deref } from './refs.js';
+import { isSensitiveName } from './sanitize.js';
 
 /** JSON Schema keywords that carry structure rather than prose. */
 const STRUCTURAL_KEYWORDS = [
@@ -35,6 +36,12 @@ const MAX_DEPTH = 8;
  * text comes from an untrusted document and must not reach a model as though it
  * were instruction. Local `$ref`s are followed so shared components still
  * produce useful schemas; `seen` breaks recursive definitions.
+ *
+ * Credential-shaped property names (`password`, `apiKey`, ...) are dropped
+ * from `properties` at every depth, not only at the top level, and pruned
+ * from `required` alongside them so a caller is never told to send a field
+ * that was just excluded. Parameters get the same treatment in `enumerate.ts`;
+ * this is what makes that exclusion apply to request bodies too.
  */
 export function compileSchema(
   input: any,
@@ -62,8 +69,18 @@ export function compileSchema(
     if (keyword === 'properties') {
       out.properties = {};
       for (const [name, child] of Object.entries(value as Record<string, unknown>)) {
+        // A credential-shaped property name never enters the schema, at any
+        // depth: the value itself is untrusted, but the *name* is enough to
+        // tell a caller "put a secret here", which is exactly what a tool
+        // schema must not do.
+        if (isSensitiveName(name)) continue;
         out.properties[name] = compileSchema(child, depth + 1, document, nextSeen);
       }
+    } else if (keyword === 'required') {
+      // Drop any excluded property from `required` too, so the schema never
+      // asks a caller to supply a field that was just removed.
+      const kept = (value as unknown[]).filter((name) => typeof name === 'string' && !isSensitiveName(name));
+      if (kept.length) out.required = kept;
     } else if (keyword === 'items') {
       out.items = compileSchema(value, depth + 1, document, nextSeen);
     } else if (COMPOSITE_KEYWORDS.has(keyword)) {
