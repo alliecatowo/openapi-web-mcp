@@ -22,6 +22,9 @@ export interface FakeSwagger {
   respondWith: (response: { status: number; body?: unknown; headers?: Record<string, string> }) => void;
   /** Mark schemes authorized, as Swagger UI's authorize dialog would. */
   authorize: (...schemes: Array<{ name: string; type?: string } | string>) => void;
+  /** Type into Try-it-out fields exactly as a person would, through the store. */
+  typeParam: (path: string, method: string, name: string, location: string, value: unknown) => void;
+  typeBody: (path: string, method: string, value: string, contentType?: string) => void;
   system: any;
 }
 
@@ -80,7 +83,13 @@ export function fakeSwagger(spec: any, options: { withCredentials?: boolean } = 
       // operation once the path item itself has been resolved.
       specJsonWithResolvedSubtrees: () => immutableLike(resolvedView()),
       responseFor: (path: string, method: string) => responses.get(key(path, method)),
-      specUrl: () => 'https://docs.test/openapi.yaml'
+      specUrl: () => 'https://docs.test/openapi.yaml',
+      // Mirrors Swagger's parameterWithMeta: the value the person typed into
+      // the operation's Try-it-out field, if any.
+      parameterWithMeta: (pathMethod: string[], name: string, location: string) => ({
+        get: (field: string) =>
+          field === 'value' ? params.get(`${key(pathMethod[0], pathMethod[1])}|${location}|${name}`) : undefined
+      })
     },
     specActions: {
       requestResolvedSubtree: async (keyPath: string[]) => {
@@ -141,7 +150,10 @@ export function fakeSwagger(spec: any, options: { withCredentials?: boolean } = 
         bodies.set(key(pathMethod[0], pathMethod[1]), { value, contentType: existing?.contentType });
       }
     },
-    oas3Selectors: {},
+    oas3Selectors: {
+      requestBodyValue: (path: string, method: string) => bodies.get(key(path, method))?.value,
+      requestContentType: (path: string, method: string) => bodies.get(key(path, method))?.contentType
+    },
     authSelectors: { authorized: () => authorized },
     getConfigs: () => ({ withCredentials: options.withCredentials ?? true })
   };
@@ -154,13 +166,19 @@ export function fakeSwagger(spec: any, options: { withCredentials?: boolean } = 
         body: response.body ?? {},
         headers: response.headers ?? { 'content-type': 'application/json' }
       };
-    },
-    authorize: (...schemes) => {
+    },    authorize: (...schemes) => {
       authorized = Object.fromEntries(
         schemes.map((scheme) =>
           typeof scheme === 'string' ? [scheme, { schema: { type: 'unknown' } }] : [scheme.name, { schema: { type: scheme.type ?? 'unknown' } }]
         )
       );
+    },
+    typeParam: (path, method, name, location, value) => {
+      system.specActions.changeParam([path, method], name, location, value, false);
+    },
+    typeBody: (path, method, value, contentType) => {
+      if (contentType) system.oas3Actions.setRequestContentType({ value: contentType, pathMethod: [path, method] });
+      system.oas3Actions.setRequestBodyValue({ value, pathMethod: [path, method] });
     },
     system
   };
