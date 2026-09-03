@@ -1,0 +1,8 @@
+# ONE-SHOT BUILD CONTRACT — SWAGGER UI / OPENAPI WEBMCP
+
+This file is the vendored authoritative product and implementation contract supplied with this build. The complete source prompt is preserved in the repository history and governs the implementation: build `swagger-ui-webmcp` as a reusable Swagger UI plugin, keep Swagger UI fully functional without WebMCP, generate safe versioned tools from the loaded OpenAPI document, execute through the live Swagger/browser session, respect the selected server and current authorization, visibly reflect results in Swagger where practical, ship a public demo, tests, documentation, license, and submission material. Do not build an AI client, MCP server, Swagger fork, connector installer, proxy, or arbitrary URL executor.
+
+Required contract highlights: Swagger UI 5.32.x (demo pinned to 5.32.14); Node 22+, TypeScript, Vite, Vitest, Playwright; Apache-2.0; core tools `openapi_get_context`, `openapi_search_operations`, `openapi_get_operation`, `openapi_execute_operation`; direct tools use `api.<safe-name>.<generation-hash>`; OpenAPI prose is untrusted and excluded from privileged metadata; auth secrets never enter tool inputs or outputs; selected server/auth/interceptors/browser credentials are read live at execution time; direct tools are capped at 64 by default; unsupported binary bodies degrade safely; results are bounded/redacted; AbortSignal is honored; no production WebMCP polyfill; use a test-only modelContext shim; include the sandbox/production server-switch demo, cookie login, security tests, CI, README, architecture/tool docs, demo script, and submission draft.
+
+The full numbered requirements in the user-provided build contract are authoritative for any detail not repeated above.
+
