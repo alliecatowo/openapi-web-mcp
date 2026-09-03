@@ -2,9 +2,9 @@
 
 > If you can Try it out, your agent can too.
 
-**Swagger UI WebMCP is a reusable Swagger UI plugin that turns any OpenAPI documentation page into a live, session-scoped agent interface — the agent calls the API through the exact environment, login, and request pipeline the developer already has open in the page.**
+**A reusable Swagger UI plugin that turns any OpenAPI documentation page into a live, session-scoped agent interface — and splits the decision of what that agent may touch among the four parties who each know something different.**
 
-No AI SDK. No MCP server to install. No bearer token copied anywhere.
+The agent calls the API through the exact environment, login, and request pipeline the developer already has open in the page. No AI SDK. No MCP server to install. No bearer token copied anywhere.
 
 **Live demo: <https://openapi-web-mcp.vercel.app>** · Apache-2.0 · [Repository](https://github.com/alliecatowo/openapi-web-mcp)
 
@@ -14,17 +14,42 @@ No AI SDK. No MCP server to install. No bearer token copied anywhere.
 
 A developer working against an internal or partner API already has a browser tab where everything is correct: they are signed in, they picked *staging* from the server dropdown, they pasted the right key into Swagger UI's **Authorize** dialog, and the corporate proxy, CORS rules, and session cookies all work.
 
-To let an agent help with the same API, that entire environment has to be rebuilt somewhere else — install or write an MCP server, re-describe the endpoints, copy a bearer token out of the browser into a config file, and keep the two in sync every time the environment changes. Most people don't. So the agent is useful for writing code *about* the API and useless for actually *driving* it.
+To let an agent help with that same API, the entire environment has to be rebuilt somewhere else — install or write an MCP server, re-describe the endpoints, copy a bearer token out of the browser into a config file, and keep the two in sync every time anything changes. Most people don't. So the agent is useful for writing code *about* the API and useless for actually *driving* it.
+
+And underneath that is a second problem nobody has a good answer for: **once the connector exists, who decides what the agent may touch?** Today it's whoever wrote it, once, months ago, holding standing credentials.
 
 **Audience:** developers, QA and support engineers, and solutions/API-partner teams who live in OpenAPI documentation pages — and the API publishers who host them.
 
-## Why this is specifically a strong WebMCP use case
+## Who decides what an agent may touch
 
-WebMCP's defining property is that the *page* is the integration: capability lives in the tab, scoped to the session, and dies with it. Almost nothing fits that shape better than an API documentation page, because Swagger UI is already an execution surface that has solved every hard part:
+This is the part we think is new. Authority over an agent's reach is split four ways, because four different parties each hold information the others don't:
 
-- **The contract already exists and is machine-readable.** An OpenAPI document is the highest-quality tool definition source that will ever be lying around. Tools are *derived*, not hand-written — load a different document and the whole capability set is re-derived with no code change.
-- **The ambient state is the whole point.** Selected server, authorized security schemes, cookies, `withCredentials`, request/response interceptors — the things that are painful to replicate in a headless connector are simply *already true* in the tab. The agent reads them live at call time, so when the human flips the dropdown from Sandbox to Production, the agent's next call follows. Nothing re-registers.
-- **Ephemerality is a feature, not a limitation.** Nobody wants a persistent connector with standing write access to production. Here, capability exists only while the tab is open, only for the document loaded, and only up to what the human has authorized.
+| Party | Knows | Instrument | Scope |
+|---|---|---|---|
+| **API publisher** | which endpoints are dangerous | `x-webmcp` in the OpenAPI document | travels with the contract, reviewed and versioned |
+| **Page owner** | what this deployment is for | `webMcp.exposure`, `policyResolver` | page configuration |
+| **Person at the page** | what is happening *right now* | per-operation session locks | this tab; dies on reload |
+| **WebMCP client** | what to ask a human | MCP annotations + structured errors | the agent host |
+
+The rule that makes those compose rather than conflict: **every source may only tighten.** All of them reduce to a level on the lattice `hidden < read < write`, the tightest wins, and `hidden` survives every setting — because refusing exposure is never a privilege escalation.
+
+That gives real properties, not just configuration:
+
+- An OpenAPI document is untrusted input, so by default it can hide operations or hold writes at read, but **cannot talk a `read` page into writes**.
+- A page-supplied `policyResolver` is page code, so it may only take capability away — and even for authorization gates, an *incomparable* gate keeps the document's, so a resolver can never loosen by naming a different scheme.
+- A page `exposure: "hidden"` is an absolute kill switch no annotation can override, even under `trustSpecAnnotations`.
+- Malformed or hostile annotation values are **dropped, not guessed at**, so a bad annotation degrades to "no annotation" rather than to a weaker policy.
+
+Notably, the party that does *not* get a vote is the agent. Session locks are module state the tools never touch: no input schema carries a lock field, no tool reads or writes one. The agent observes only the *effect* — `agentPolicy` reports `locked: true` so it can make sense of a `LOCKED` denial and say so instead of retrying.
+
+## Why the documentation page is the right place for this
+
+WebMCP's defining property is that the *page* is the integration: capability lives in the tab, scoped to the session, and dies with it. Almost nothing fits that shape better than an API documentation page, because Swagger UI has already solved every hard part:
+
+- **The contract already exists and is machine-readable.** An OpenAPI document is the highest-quality tool-definition source that will ever be lying around. Tools are *derived*, not hand-written — load a different document and the whole capability set is re-derived with no code change.
+- **The ambient state is the whole point.** Selected server, authorized security schemes, cookies, `withCredentials`, request/response interceptors — the things that are painful to replicate in a headless connector are simply *already true* in the tab. They are read live at call time, so when the human flips the dropdown from Sandbox to Production, the agent's next call follows. Nothing re-registers.
+- **Ephemerality is a feature.** Nobody wants a persistent connector with standing write access to production. Capability exists only while the tab is open, only for the document loaded, and only up to what the human has authorized.
+- **It is where the human already is.** Governance you have to leave the task to exercise is governance nobody exercises. The lock is next to the endpoint.
 - **It generalizes.** This is not one app made agent-friendly; it is a plugin. Every Swagger UI page that adds one import becomes an agent surface for whatever API it documents.
 
 A conventional MCP server is still the right answer for persistent, headless automation. This is for the documentation page itself as the integration context.
@@ -36,17 +61,17 @@ A conventional MCP server is still the right answer for persistent, headless aut
 | Environment | Configured separately | The Swagger server you selected |
 | Authorization | Configured again | The browser/Swagger auth you already have |
 | Tool source | Hand-maintained | Derived from the loaded OpenAPI document |
+| Revocation | Edit config, restart | A dropdown, next to the endpoint |
 | Best for | Automation anywhere | Working *with* an API, in its docs |
 
 ## What humans and agents can do together
 
-This was built around one idea: the person and the agent share **one session, one set of fields, and one visible transcript** — not two parallel worlds.
+The person and the agent share **one session, one set of fields, and one visible transcript** — not two parallel worlds.
 
 - **Shared environment.** The human signs in, selects Sandbox, and authorizes a scheme in Swagger UI's own dialog. The agent's calls inherit all of it, live. Flip to Production mid-conversation and the next agent call goes to Production.
-- **Shared fields.** The person types `checkout` into the `q` box of Try it out and stops. The agent reads that value (`liveValues`) and finishes the call. Or the agent fills the inputs and the person reviews them in the UI before anything is submitted. Explicit agent arguments win; anything omitted comes from what is on screen.
+- **Shared fields.** The person types `checkout` into the `q` box of Try it out and stops. The agent reads that value (`liveValues`) and finishes the call. Or the agent fills the inputs and the person reviews them in the UI before anything is submitted. Explicit agent arguments win; anything omitted comes from what is on screen. Either side can start; the other completes.
 - **Shared transcript.** Every agent execution renders in Swagger UI's own response panel, where the person already looks for their own results. There is no separate agent console.
-- **Session locks — the human narrows the agent, live.** Each operation block has a small access control next to Try-it-out: **Full access**, **View only** (listed, not executable), **Read only** (reads run, writes denied), **Hidden** (invisible to the agent). You don't need to own the API server to keep an agent out of an endpoint for the next ten minutes. Locks only tighten, never widen; no tool can read or set them; a reload resets everything to what the document declares; and they never restrict what *you* can do by hand.
-- **Publisher-declared policy (`x-webmcp`).** The API team declares per-endpoint agent policy in the OpenAPI document itself — `read` / `write` / `hidden`, plus `requiresAuth` and `destructive` hints — so the page owner and the API owner each control the half they actually understand.
+- **Live narrowing.** Each operation block has an access control next to Try-it-out: **Full access**, **View only** (listed, not executable), **Read only** (reads run, writes denied), **Hidden** (invisible to the agent). You don't need to own the API server to keep an agent out of an endpoint for the next ten minutes. A reload resets everything to what the document declares, and locks never restrict what *you* can do by hand.
 - **Receipts in both directions.** The demo API logs whether each write arrived via the agent pipeline or by hand: `GET /audit-events` shows `webmcp-agent` versus `swagger-ui`.
 
 The thing that was hard before: *letting an agent act on a real, authenticated, environment-specific API without provisioning it any standing credentials or infrastructure* — and being able to see, constrain, and revoke that in the same place you were already working.
@@ -61,15 +86,17 @@ The thing that was hard before: *letting an agent act on a real, authenticated, 
 
 > **You have WebMCP tools on this page. Call `openapi_get_context` and tell me which API and environment I'm on. Then list the active projects. Then try to fetch the usage report and tell me exactly why it fails and what I'd have to do. Finally create a project called "Checkout reliability", add a task to it, and read `GET /audit-events` to show me which writes came from an agent.**
 
-That single prompt exercises discovery, a read, a `requiresAuth` gate refusing a call the agent can nonetheless *see*, two writes, and the audit fingerprint.
+That one prompt exercises discovery, a read, a `requiresAuth` gate refusing a call the agent can nonetheless *see*, two writes, and the audit fingerprint.
 
 Then, by hand, do any of these and ask again — the agent adapts with no reconfiguration:
 
 - Click **Authorize**, paste `waypoint-demo-bearer` for `bearerAuth`, and re-ask for the usage report. It now returns 200.
 - Switch the server dropdown to **Production** and ask for the projects again. Different data store, same tools.
-- Set `DELETE /projects/{projectId}` to **Read only** in its access control and ask the agent to delete a project. It gets a structured `LOCKED` error.
+- Set `DELETE /projects/{projectId}` to **Read only** and ask the agent to delete a project. It gets a structured `LOCKED` error — then set it back and watch the same call succeed.
 - Ask the agent to charge the account $50. `POST /billing/charges` is `tool: hidden` — it is absent from the agent's capability set entirely, while you can still run it yourself in Try it out.
 - Load the **Waypoint — no x-webmcp** document from the switcher, or paste any OpenAPI URL. The tool set is re-derived from whatever is loaded.
+
+The demo API is real and stateful, not a stub: 28 operations covering every HTTP method, path/query/header parameters, repeated array query parameters, cursor pagination, `If-Match` optimistic concurrency returning 409, an async 202 job with polling, a 207 multi-status bulk update, a multipart upload deliberately unsupported as a direct tool, two hidden operations, a write held at read, three `requiresAuth` gates across three scheme types, and deliberate 401/404/422 paths — with separate Sandbox and Production data stores.
 
 Demo credentials (nothing real is protected by them): `bearerAuth` → `waypoint-demo-bearer`; `waypointKey` header `X-Waypoint-Key` → `waypoint-demo-key`; `waypointQueryKey` query `key` → `waypoint-demo-query-key`.
 
@@ -92,13 +119,31 @@ SwaggerUI({
 
 The plugin peers with `swagger-ui >=5.32.0 <5.33.0` and is tested against 5.32.14.
 
-**Registration.** On every document load the plugin enumerates operations from Swagger UI's own resolved spec, resolves `$ref`s, converts parameters and request bodies into JSON Schema tool inputs, computes a stable generation hash of the document, and registers the tools. Reloading or swapping the document unregisters the previous generation and registers a new one.
+### Registration
 
-**Execution.** Tools never name a URL. A call resolves its operation against the *currently selected* Swagger server, then goes out through Swagger UI's own request pipeline — same interceptors, same `withCredentials`, same auth application, same response rendering. That is why environment and login are inherited rather than duplicated, and why agent calls appear in the normal response panels.
+On every document load the plugin enumerates operations from Swagger UI's own resolved spec, resolves local `$ref`s, converts parameters and request bodies into JSON Schema tool inputs, computes a generation hash, and registers tools. The hash covers the raw operation, so changing an `x-webmcp` annotation changes the tool's name — policy changes are visible in tool identity.
 
-**Authorization.** Direct tools, the generic executor, and the batch executor all funnel through one authorization function evaluated at call time against live state, so there is exactly one place exposure is enforced. It composes, in order: the page's `exposure`, the document's `x-webmcp`, the page's `policyResolver`, and the human's session locks — on the lattice `hidden < read < write`, where by default **the tightest wins** and a document may only tighten. `requiresAuth` is then checked against Swagger UI's live authorized schemes.
+Generations are managed with `AbortController`. Two details that are not obvious: the previous generation must be aborted **before** the next is registered, because unchanged operations keep their tool names across generations and aborting afterwards would delete the new tools through those shared names; and a supersede guard means only the current generation records itself, since a newer rebuild may land while registrations are in flight. Session locks join the spec fingerprint as generation identity, so locking re-derives the capability set through the same path a document swap does.
 
-**The page never prompts.** Permission UX belongs to the WebMCP client. The page's interface to the client is registration visibility, MCP annotations (`readOnlyHint`, `destructiveHint`, `untrustedContentHint`), and structured errors (`AUTH_REQUIRED`, `LOCKED`, `OPERATION_DENIED`).
+### Execution — and the tax it costs
+
+Tools can never name a URL. A call resolves its operation against the *currently selected* Swagger server, and then — deliberately — **does not build its own fetch client.** Arguments are written into the Swagger store, `specActions.execute` runs the request through the page's configured interceptors, credentials, and selected server, and the result is read back out of the store. That is why environment and login are inherited rather than duplicated, and why agent calls render in the normal response panels.
+
+Driving someone else's store instead of owning one has real costs, and paying them honestly is what makes the claim work:
+
+- **Executions are serialized through a promise queue.** Swagger's store holds one form per operation, so concurrent calls — or an agent call racing the human's typing — would clobber each other's parameters.
+- **Responses are observed, not awaited.** Swagger's action wrappers swallow exceptions and return `undefined`, so completion is detected by watching for the Immutable response record to be replaced.
+- **Both the path item and the operation are resolved.** Parameters declared once on the path item merge into the operation only when the *path item* is resolved; without that, Swagger collects no value for them and sends a literal `{placeholder}` in the URL.
+- **Path parameters are validated on the merged set before anything is written**, for the same reason.
+- **Arrays and objects are handed over unflattened**, so Swagger applies each parameter's own `style`/`explode` rules — which is how repeated array query parameters work correctly.
+
+### Authorization
+
+Direct tools, the generic executor, and the batch executor all funnel through one `authorize` function evaluated at call time against live state, so there is exactly one place exposure is enforced. It composes page `exposure`, the document's `x-webmcp`, the page's `policyResolver`, and the human's session locks on the `hidden < read < write` lattice, then checks `requiresAuth` against Swagger UI's live authorized schemes. Nothing is cached: authorizing in Swagger UI, or changing a lock, flips the *next* call with no re-registration.
+
+**The page never prompts.** Permission UX belongs to the WebMCP client. The page's interface to the client is exactly three things: registration visibility, MCP annotations (`readOnlyHint`, `destructiveHint`, `untrustedContentHint`), and structured errors (`AUTH_REQUIRED`, `LOCKED`, `OPERATION_DENIED`, `READ_ONLY_MODE`).
+
+An earlier version of this plugin shipped a full in-page consent system — a shadow-DOM console, consent cards showing argument JSON, allow-once/allow-always. It was deleted. A page that prompts is a second policy engine competing with the client's, and the page's has less context. [docs/DECISIONS.md](docs/DECISIONS.md) records that removal, and the one part of it that was later reversed on purpose.
 
 ### Tools
 
@@ -115,7 +160,7 @@ Full input shapes, the `agentPolicy` result field, error codes, and the `x-webmc
 
 ### Configuration
 
-All options live under the `webMcp` key of the Swagger UI config and are read live, so changes after startup take effect on the next call.
+All options live under the `webMcp` key of the Swagger UI config and are re-read on every use — Swagger UI has not finished merging user configuration when a plugin's `afterLoad` runs, so anything captured at construction time would silently be a default. It also means changes after startup take effect on the next call.
 
 | Option | Type | Default | Effect |
 |---|---|---|---|
@@ -149,42 +194,45 @@ paths:
 ```
 
 - `tool` — `read`, `write`, or `hidden`. What the operation *is* for agents.
-- `requiresAuth` — `true`, a scheme name, or a list. The operation stays SEE-able but is not CALL-able until Swagger UI's live auth state satisfies it; an early call returns a structured `AUTH_REQUIRED`, and authorizing in the normal dialog makes the same call succeed.
+- `requiresAuth` — `true`, a scheme name, or a list (several names mean ANY of them, mirroring OpenAPI `security` alternatives). The operation stays SEE-able but is not CALL-able until Swagger UI's live auth state satisfies it; an early call returns `AUTH_REQUIRED`, and authorizing in the normal dialog makes the same call succeed.
 - `destructive` — surfaces as `destructiveHint` so the client can gate the invocation. It never prompts anyone by itself.
 
-Unrecognised or malformed values are dropped rather than guessed at, so a hostile annotation degrades to "no annotation" rather than to a weaker policy. There are no consent keys and no legacy aliases.
+There are no consent keys and no legacy aliases; the old vocabulary named prompting behaviour, and keeping aliases would let a copied annotation silently mean something its author never intended.
 
-**Three distinct states.** *Hidden*: absent from search, inspection, execution, and registration — the agent has no evidence it exists, while a human can still call it by hand. *Held* (a write under a `read` level): still discoverable, `callable: false`, so the agent can explain why it cannot proceed instead of retrying. *Gated* (`requiresAuth` unsatisfied): visible and correctly annotated with the schemes it needs, refused until a human authorizes.
+**Three distinct states.** *Hidden*: absent from search, inspection, execution, and registration — a lookup returns `OPERATION_NOT_FOUND`, indistinguishable from a typo, so the agent has no evidence it exists, while a human can still call it by hand. *Held* (a write under a `read` level): still discoverable, `callable: false`, so the agent can explain why it cannot proceed. *Gated* (`requiresAuth` unsatisfied): visible and correctly annotated with the schemes it needs, refused until a human authorizes.
 
 ## Architecture
 
 ```
 apps/demo/            Waypoint demo page: Swagger UI 5.32.14 + the plugin, document switcher
-packages/swagger-ui-webmcp/
-  openapi/            enumerate · $ref resolution · schema conversion · sanitize · generation hash
-  policy/             the hidden<read<write lattice; x-webmcp parsing; locks; composition
-  swagger/            reads live spec/server/auth/values from the Swagger store; executes and renders
-  webmcp/             modelContext detection, tool registration, result shaping
+packages/swagger-ui-webmcp/       ~2,100 lines
+  openapi/            enumerate · local $ref resolution · schema compilation · sanitize · generation hash
+  policy/             the hidden<read<write lattice; x-webmcp parsing; session locks; composition
+  swagger/            live spec/server/auth/field reads; execution through Swagger's own pipeline; lock UI
+  webmcp/             modelContext detection, the single authorization gate, tool definitions, registry
 api/_waypoint/        one stateful router + store, shared by the Vite dev server and the Vercel function
 tests/                unit suites + a Playwright e2e suite driven through a test-only modelContext shim
 ```
 
-**Request path:** tool call → single authorization function (page exposure ∧ `x-webmcp` ∧ `policyResolver` ∧ session lock, then `requiresAuth` against live auth) → argument merge over live Try-it-out values → Swagger UI's own executor against the selected server → response rendered into Swagger UI's panel → bounded, redacted result returned to the agent.
+**Request path:** tool call → the single `authorize` gate (page exposure ∧ `x-webmcp` ∧ `policyResolver` ∧ session lock, then `requiresAuth` against live auth) → argument merge over live Try-it-out values → serialized execution through Swagger UI's own executor against the selected server → response rendered into Swagger UI's panel → bounded, redacted result returned to the agent.
 
 The demo's local dev server and its deployed serverless function import the *same* router module, so the hosted and local demos cannot diverge.
 
-More detail: **[docs/architecture.md](docs/architecture.md)** and **[docs/DECISIONS.md](docs/DECISIONS.md)**.
+More detail: **[docs/architecture.md](docs/architecture.md)**. The reasoning behind each design decision, including the ones that were reversed: **[docs/DECISIONS.md](docs/DECISIONS.md)**.
 
 ## Security and limitations
 
-- OpenAPI prose and API responses are untrusted content and never enter privileged generated metadata; tool descriptions are assembled from structural facts only, and results carry `untrustedContentHint`.
-- Auth values never enter tool inputs or results. Credential-shaped parameter and header names are excluded, and response headers are redacted. `openapi_get_context` reports scheme *names and types* only.
-- No tool can name a URL. Every call resolves against the currently selected Swagger server; normal CORS and browser permissions still apply.
-- Response bodies are bounded to ~50 KB; binary content is reported by type and size rather than inlined; `AbortSignal` is honoured.
+The safety properties are structural — enforced by what the code can express, not by promises:
+
+- **Untrusted prose never reaches a model as metadata.** Schema compilation runs an *allowlist* of 21 structural JSON Schema keywords; `description`, `examples`, `title`, and `externalDocs` are dropped rather than sanitized. Parameter descriptions are *replaced* with a generated `path parameter "id".`-style string. Tool descriptions are assembled from method, path, and where execution happens. Results carry `untrustedContentHint`.
+- **Credential-shaped names are excluded at enumeration**, so they never enter a schema at all — which is also why `liveValues` cannot leak them: there is nothing declared to read back. Response headers are redacted, and `openapi_get_context` reports scheme *names and types* only.
+- **The plugin never makes its own network requests.** `$ref` resolution follows local `#/` pointers only; external references are deliberately left unresolved. No tool can name a URL — every call resolves against the currently selected Swagger server, and normal CORS and browser permissions still apply.
+- **Server-owned fields are never asked of the caller**: a schema property marked `readOnly: true` compiles away entirely.
+- Response bodies are bounded to ~50 KB; binary content is reported by type and size rather than inlined; `AbortSignal` is honoured throughout, including between batch steps.
 - Write methods are never marked read-only. Binary and multipart request bodies are not exposed as direct tools in v1.
-- Cookie-based sessions are invisible to `requiresAuth` — Swagger's live auth state only reflects schemes it applies itself (HTTP, API keys) — so session-gated endpoints surface API 401s rather than `AUTH_REQUIRED`.
+- Cookie-based sessions are invisible to `requiresAuth` — Swagger's live auth state only reflects schemes it applies itself (HTTP, API keys) — so session-gated endpoints surface API 401s rather than `AUTH_REQUIRED`. Gating on them would fail closed forever.
 - Session locks are in-memory page state for this session only; a reload resets to the document.
-- The audit fingerprint distinguishes *pipeline paths*, not identities. Any client could send the same header; it is an audit hint, not proof.
+- **The audit fingerprint distinguishes pipeline paths, not identities.** The plugin only reports which operation it is executing; the demo *page* tags the request. Any client could send the same header. It is an audit hint, and must never be described as proof.
 - There is no production WebMCP polyfill. Tests drive a test-only `modelContext` shim.
 
 ## Run it locally
@@ -220,7 +268,7 @@ CI runs all four on every push.
 
 A complete, flow-by-flow external verification protocol — every call, its expected tool result, and the expected visible UI change — is in **[CODEX_DRIVER.md](CODEX_DRIVER.md)**.
 
-**Without a WebMCP-capable browser**, the same behaviour is covered end-to-end by the Playwright suite, which drives a test-only `modelContext` shim against the real page: `npm run test:e2e`. It asserts the capability set, honest annotations, hidden/held operations, all three `requiresAuth` gates and their revocation, locks, shared fields, batch atomicity, server switching, and audit fingerprinting in both directions.
+**Without a WebMCP-capable browser**, the same behaviour is covered end-to-end by the Playwright suite, which drives a test-only `modelContext` shim against the real page: `npm run test:e2e`. It asserts the capability set, honest annotations, hidden/held operations, all three `requiresAuth` gates and their revocation, locks (including that no tool input anywhere can set one), shared fields, batch atomicity, server switching, and audit fingerprinting in both directions.
 
 ## Provenance
 
