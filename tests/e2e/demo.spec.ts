@@ -539,6 +539,36 @@ test.describe('Document-declared policy', () => {
   });
 });
 
+test.describe('A third-party public API', () => {
+  test('derives tools from an unannotated public document aimed at another origin', async ({ page }) => {
+    await withWebMcp(page);
+    await page.goto('/?spec=/openapi-open-meteo.yaml');
+    await webmcpReady(page);
+
+    // No `x-webmcp` anywhere in that document: the capability set comes from
+    // ordinary OpenAPI plus the page default. This is the whole claim — a
+    // public API that has never heard of this plugin still becomes agent-usable.
+    const names = await toolNames(page);
+    expect(names.some((name: string) => name.startsWith('api.getForecast.'))).toBe(true);
+    expect(names.some((name: string) => name.startsWith('api.getElevation.'))).toBe(true);
+
+    const context = await page.evaluate(async () => {
+      const tool = (window as any).__webmcpTools.get('openapi_get_context');
+      return tool.execute({}, {});
+    });
+    // The resolved server is the third party's own absolute origin, not ours.
+    expect(context.server.effectiveUrl).toBe('https://api.open-meteo.com');
+    expect(context.policy.hidden).toBe(0);
+
+    const detail = await page.evaluate(async () => {
+      const tool = (window as any).__webmcpTools.get('openapi_get_operation');
+      return tool.execute({ operation: 'getForecast' }, {});
+    });
+    expect(detail.agentPolicy).toMatchObject({ callable: true, declaredIn: 'page' });
+    expect(detail.inputSchema.properties.query.properties.latitude).toBeTruthy();
+  });
+});
+
 test.describe('Session locks in the docs UI', () => {
   test.beforeEach(async ({ page }) => {
     await withWebMcp(page);

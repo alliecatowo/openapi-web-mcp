@@ -1,0 +1,124 @@
+openapi: 3.1.0
+
+# A real, public, third-party API. Open-Meteo has never heard of WebMCP, this
+# plugin, or this page. Nothing here is annotated: there is no `x-webmcp` block
+# anywhere in this document, so the whole agent capability set is derived from
+# ordinary OpenAPI plus the page's own default exposure.
+#
+# It needs no key and sends permissive CORS, so calls an agent makes from this
+# page reach Open-Meteo's servers for real. Reproduced here (CC BY 4.0) only so
+# the demo does not depend on a third-party document URL staying reachable.
+
+info:
+  title: Open-Meteo (public third-party API)
+  version: '1.0'
+  summary: A real public weather API that knows nothing about WebMCP.
+  description: |
+    Open-Meteo is a free weather API requiring no authentication. This document
+    is an ordinary OpenAPI description with no agent annotations of any kind.
+    Load it here and the plugin still derives a full tool set, and an agent can
+    make real calls to api.open-meteo.com from your browser — no curl, no key,
+    no server-side proxy, and nothing installed.
+  license:
+    name: CC BY 4.0
+    url: https://creativecommons.org/licenses/by/4.0/
+
+servers:
+  - url: https://api.open-meteo.com
+    description: Open-Meteo public API
+
+tags:
+  - name: Weather
+    description: Forecasts and terrain for a coordinate.
+
+paths:
+  /v1/forecast:
+    get:
+      operationId: getForecast
+      tags: [Weather]
+      summary: Weather forecast for a coordinate
+      description: Current conditions plus optional hourly and daily series.
+      parameters:
+        - name: latitude
+          in: query
+          required: true
+          schema: { type: number, minimum: -90, maximum: 90 }
+        - name: longitude
+          in: query
+          required: true
+          schema: { type: number, minimum: -180, maximum: 180 }
+        - name: current
+          in: query
+          description: Comma-separated current-condition variables.
+          schema:
+            type: string
+            default: temperature_2m,wind_speed_10m,relative_humidity_2m
+        - name: daily
+          in: query
+          description: Comma-separated daily variables.
+          schema:
+            type: string
+            examples: [temperature_2m_max,temperature_2m_min,precipitation_sum]
+        - name: forecast_days
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 16, default: 7 }
+        - name: timezone
+          in: query
+          schema: { type: string, default: auto }
+        - name: temperature_unit
+          in: query
+          schema:
+            type: string
+            enum: [celsius, fahrenheit]
+            default: celsius
+      responses:
+        '200':
+          description: Forecast
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  latitude: { type: number }
+                  longitude: { type: number }
+                  elevation: { type: number }
+                  timezone: { type: string }
+                  current_units: { type: object }
+                  current: { type: object }
+                  daily_units: { type: object }
+                  daily: { type: object }
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  reason: { type: string }
+
+  /v1/elevation:
+    get:
+      operationId: getElevation
+      tags: [Weather]
+      summary: Terrain elevation for a coordinate
+      parameters:
+        - name: latitude
+          in: query
+          required: true
+          schema: { type: number, minimum: -90, maximum: 90 }
+        - name: longitude
+          in: query
+          required: true
+          schema: { type: number, minimum: -180, maximum: 180 }
+      responses:
+        '200':
+          description: Elevation in metres above sea level
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  elevation:
+                    type: array
+                    items: { type: number }

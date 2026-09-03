@@ -49,6 +49,15 @@ async function refreshSession() {
   sessionBox.append(label, signIn);
 }
 
+/** True when a request goes back to the page's own origin (the demo API). */
+function isSameOrigin(url: string): boolean {
+  try {
+    return new URL(url, location.href).origin === location.origin;
+  } catch {
+    return false;
+  }
+}
+
 const ui = SwaggerUI({
   dom_id: '#swagger-ui',
   url: initialSpec,
@@ -58,7 +67,14 @@ const ui = SwaggerUI({
   // ones to show them apart in the audit log. The plugin only reports which
   // operation it is running; it never touches credentials.
   requestInterceptor: (request: any) => {
-    if (agentExecution.current) request.headers['X-Waypoint-Client'] = 'webmcp-agent';
+    // Only tag our own API. A custom header on a cross-origin request forces a
+    // CORS preflight, and a third-party server that does not list this header
+    // in `Access-Control-Allow-Headers` would reject the agent's call while
+    // letting a human's Try-it-out through — the audit marker is not worth
+    // breaking the public-API demo for.
+    if (agentExecution.current && isSameOrigin(request.url)) {
+      request.headers['X-Waypoint-Client'] = 'webmcp-agent';
+    }
     return request;
   },
   webMcp: {

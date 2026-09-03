@@ -14,7 +14,7 @@
       <header class="hero">
         <div class="hero-copy">
           <h1>Waypoint Projects API</h1>
-          <p class="tagline">If you can Try it out, your agent can too.</p>
+          <p class="tagline">Any OpenAPI page becomes an agent interface. If you can Try it out, your agent can too.</p>
         </div>
         <div class="hero-side">
           <span id="status" class="status">Loading</span>
@@ -25,9 +25,10 @@
       <section class="bar" aria-label="Loaded document">
         <span class="bar-label">Document</span>
         <div class="bar-chips">
-          <button type="button" data-spec="/openapi.yaml" class="chip is-active">Waypoint</button>
-          <button type="button" data-spec="/openapi-unannotated.yaml" class="chip">Waypoint <small>without agent policy</small></button>
-          <button type="button" data-spec="https://petstore3.swagger.io/api/v3/openapi.json" class="chip">Swagger Petstore <small>someone else&rsquo;s API</small></button>
+          <button type="button" data-spec="/openapi.yaml" class="chip is-active">Demo API <small>public + private</small></button>
+          <button type="button" data-spec="/openapi-open-meteo.yaml" class="chip">Open-Meteo <small>real public API, no key</small></button>
+          <button type="button" data-spec="/openapi-unannotated.yaml" class="chip">Demo API <small>no annotations</small></button>
+          <button type="button" data-spec="https://petstore3.swagger.io/api/v3/openapi.json" class="chip">Petstore <small>live third-party doc</small></button>
         </div>
         <form id="specForm" class="spec-form">
           <label class="sr-only" for="specUrl">OpenAPI document URL</label>
@@ -55,22 +56,29 @@ SwaggerUI({
             </p>
           </div>
           <div>
-            <h2>Reading and writing works signed out</h2>
+            <h2>What this page proves</h2>
             <p>
-              Explore freely &mdash; nothing here is behind a login. <strong>Sign in</strong> is optional: it shares a
-              browser session with the agent and shows up in the audit log, but it never blocks a call.
+              Pick <strong>Open-Meteo</strong> above. It is a real public weather API with no key, no annotations,
+              and no idea this plugin exists. The agent still gets tools for it and makes real calls to
+              <code>api.open-meteo.com</code> straight from your browser &mdash; no curl, no MCP server, nothing
+              installed. Any OpenAPI URL you paste behaves the same way.
             </p>
-            <h2>Three operations do require authorization</h2>
+            <h2>Public and private, in one document</h2>
             <p>
-              They declare <code>x-webmcp.requiresAuth</code>, so Swagger draws its padlock on them and an agent
-              calling one early gets a structured <code>AUTH_REQUIRED</code>. Authorize with the button below and the
-              same call succeeds.
+              On the <strong>Demo API</strong>, most operations are open &mdash; read and write them right now, signed
+              out. Three declare <code>x-webmcp.requiresAuth</code>, so Swagger draws its padlock on exactly those,
+              and an agent calling one early gets a structured <code>AUTH_REQUIRED</code>. Authorize below and the
+              same call succeeds. That is the escalation from public to privileged, live.
             </p>
             <ul>
               <li><code>bearerAuth</code> &mdash; usage report: <code>waypoint-demo-bearer</code></li>
               <li><code>waypointKey</code> &mdash; header <code>X-Waypoint-Key</code>, create export: <code>waypoint-demo-key</code></li>
               <li><code>waypointQueryKey</code> &mdash; query <code>key</code>, export status: <code>waypoint-demo-query-key</code></li>
             </ul>
+            <p>
+              <strong>Sign in</strong> is optional and gates nothing. It only shows the agent sharing your browser
+              session, and tags writes in the audit log.
+            </p>
           </div>
         </div>
       </details>

@@ -103,7 +103,14 @@ async function resolveOperation(system: any, op: CompiledOperation) {
   while (Date.now() < deadline) {
     const parameters = node?.getIn?.(['parameters']);
     const count = parameters?.size ?? parameters?.length ?? 0;
-    if (node && count >= expected) return node;
+    // A resolved subtree first receives a list with the raw $ref placeholders,
+    // then replaces each entry. Swagger's parameterValues selector assumes every
+    // entry is an Immutable record; running in the gap makes its renderer throw
+    // while the request itself can still complete. Count alone is therefore not
+    // enough to say the operation is ready.
+    const entries = parameters?.toArray?.() ?? parameters ?? [];
+    const parametersResolved = Array.from(entries as any[]).every((parameter: any) => parameter?.get);
+    if (node && count >= expected && parametersResolved) return node;
     await delay(POLL_INTERVAL_MS);
     node = read();
   }
