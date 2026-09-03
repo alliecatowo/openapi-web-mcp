@@ -113,7 +113,21 @@ Unrecognised or malformed annotation values are dropped rather than guessed at, 
 - **Hidden** (`tool: hidden`): the operation is absent from `openapi_search_operations`, `openapi_get_operation`, execution, and direct-tool registration. The agent has no evidence it exists. A human can still call it in Swagger UI.
 - **Held** (a write under a `read` level): the operation is still discoverable, and its `agentPolicy` says it is not callable, so the agent can explain why it cannot proceed. It gets no direct tool.
 - **Gated** (`requiresAuth` unsatisfied): the operation is registered, listed, and correctly annotated — the agent sees it and which schemes it needs — but calling it returns `AUTH_REQUIRED`. Authorizing in Swagger UI flips the next call to success with no re-registration.
-- **Consent and client-side locking are the client's job.** The page never prompts, never remembers grants, and never hides or disables tools in the agent's own state. Its interface to the client is registration visibility plus MCP annotations (`readOnlyHint`, `destructiveHint`, `untrustedContentHint`) plus structured errors.
+- **Consent and client-side gating are the client's job.** The page never prompts, never remembers grants, and never reaches into the agent's own state. Its interface to the client is registration visibility plus MCP annotations (`readOnlyHint`, `destructiveHint`, `untrustedContentHint`) plus structured errors. Session locks (below) are the page's own declaration: a person narrowing what the page exposes, which the client observes through the same visibility and errors.
+
+## Session locks: what a person allows the agent, right now
+
+Every operation block in the docs carries a small access control next to Try-it-out, styled like Swagger UI. A person looking at the page can restrict an operation for the agent — view only (listed with its spec, but calls return a structured `LOCKED` error), read only (reads run, writes denied), or hidden (unregistered and unsearchable). A session bar under the API info offers the unlock-all reset while locks are active.
+
+Use cases: an endpoint you don't want the agent to accidentally call but whose server you don't control; confining a looping agent to a subset while debugging; hiding noisy operations so the agent only sees what's relevant.
+
+Locks are for this session only — in-memory page state, and a reload resets every operation to what the spec declares. They can only tighten what `x-webmcp` allows, never widen it. The agent cannot mutate locks (no tool reads or writes lock state; `agentPolicy` only reports the effective exposure so the agent understands a `LOCKED` denial), auth gating stays live login state with no lock control, and locks never limit what the person can do by hand.
+
+## Shared fields and the audit fingerprint
+
+The agent and the person use the same Try-it-out fields in the same Swagger store. The agent sees what the person already typed (`liveValues` on operation reads), and executing with empty or partial arguments submits the current UI values — explicit arguments always win, and the merged set renders in Swagger UI's own panels.
+
+Every agent execution leaves a fingerprint answering "did an agent call this": the plugin marks its invocations, the demo page tags those requests `X-Waypoint-Client: webmcp-agent`, and the demo API records the pipeline source on every audited write — `GET /audit-events` shows `webmcp-agent` versus `swagger-ui`. Within the demo that distinguishes pipeline paths; it is an audit hint, not an identity proof. See [docs/webmcp-tools.md](docs/webmcp-tools.md) for the full reference.
 
 ## Tools
 

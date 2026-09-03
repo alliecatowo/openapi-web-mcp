@@ -25,7 +25,7 @@ Returns:
   "server": { "effectiveUrl": "/api/sandbox" },
   "auth": { "authorizedSchemes": [{ "name": "bearerAuth", "type": "http" }], "withCredentials": true },
   "operations": { "total": 28, "supported": 27, "directToolsRegistered": 24, "directToolLimit": 64 },
-  "policy": { "pageExposure": "write", "trustSpecAnnotations": true, "read": 12, "write": 13, "blocked": 1, "hidden": 2 }
+  "policy": { "pageExposure": "write", "trustSpecAnnotations": true, "read": 12, "write": 13, "blocked": 1, "hidden": 2, "locked": 0 }
 }
 ```
 
@@ -65,6 +65,8 @@ Operations hidden by `x-webmcp.tool: hidden`, or by `operationFilter`, do not ap
 
 `operation` accepts an `operationId`, a `METHOD /path` key, or a direct tool name. Returns the search fields plus `description`, `parameters`, `requestBody`, and the compiled `inputSchema`. Ambiguous identifiers return `OPERATION_AMBIGUOUS`; use `METHOD /path`.
 
+It also reports `liveValues`: whatever the person already typed into this operation's Try-it-out fields, read live from the Swagger store and bounded (long values are truncated, credential-shaped names are never surfaced). Executing with empty or partial arguments submits these values — see [Shared Try-it-out fields](#shared-try-it-out-fields).
+
 ### `openapi_execute_operation`
 
 ```json
@@ -84,6 +86,8 @@ Operations hidden by `x-webmcp.tool: hidden`, or by `operationFilter`, do not ap
 ```
 
 Executes through Swagger UI's own execution path, so the selected server, authorization state, request and response interceptors, and browser credentials are all read live at call time. Array and object values are handed to Swagger unflattened and serialised according to the parameter's own `style` and `explode` rules.
+
+Empty or partial arguments fall back to the operation's current Try-it-out values: explicit arguments always win, and the merged set is what gets written, sent, and rendered in Swagger UI's own panels — see [Shared Try-it-out fields](#shared-try-it-out-fields).
 
 Returns:
 
@@ -177,18 +181,22 @@ Documents with more operations than `maxDirectOperationTools` (default 64) regis
   "callable": true,
   "requiresAuth": ["bearerAuth"],
   "authorized": false,
+  "locked": false,
+  "lock": null,
   "declaredIn": "openapi-document"
 }
 ```
 
 | Field | Values | Meaning |
 |---|---|---|
-| `exposure` | `read` \| `write` \| `hidden` | The resolved level. Never `hidden` here — hidden operations are not reported at all. |
+| `exposure` | `read` \| `write` \| `hidden` | The resolved level, including this session's locks. Never `hidden` here — hidden operations are not reported at all. |
 | `readOnly` | boolean | True for GET/HEAD/OPTIONS. |
 | `destructive` | boolean | The publisher marked the operation irreversible. Surfaces as `destructiveHint`. |
-| `callable` | boolean | Whether a call would be attempted right now: false when held, or when `requiresAuth` is unsatisfied by live auth state. |
+| `callable` | boolean | Whether a call would be attempted right now: false when held, view-locked, or when `requiresAuth` is unsatisfied by live auth state. |
 | `requiresAuth` | `null` \| `"any"` \| `string[]` | The authorization gate, if any. A list means ANY of the schemes. |
 | `authorized` | boolean | Whether Swagger UI's live auth state currently satisfies the gate. |
+| `locked` | boolean | Whether a person restricted this operation for the agent in the docs UI this session. |
+| `lock` | `null` \| `"view"` \| `"read"` | Which session lock applies, when `locked` is true. |
 | `declaredIn` | `openapi-document` \| `page` | Which source produced the level. |
 
 There is deliberately no publisher prose in `agentPolicy` or any other model-readable surface. The agent learns *that* an operation needs authorization, not an argument about it.
@@ -244,8 +252,47 @@ With page `exposure: "read"`, every write above becomes held regardless of annot
 Direct tools, `openapi_execute_operation`, and `openapi_execute_batch` all pass through one authorization function, so there is exactly one place exposure is evaluated — at call time, against live state:
 
 - Hidden or held returns an error without touching the API: `OPERATION_DENIED` for a hidden operation, `READ_ONLY_MODE` for a write held at read.
+- A session-locked operation returns `LOCKED`: view locks deny every call on the operation, read locks deny writes. Locks compose after every spec source and can only tighten — see [Session locks](#session-locks).
 - `requiresAuth` unsatisfied returns `AUTH_REQUIRED`, naming the needed schemes and pointing at Swagger UI's authorize dialog. Nothing executes.
 - Otherwise the call runs through Swagger UI's own execution path and the result is recorded with `displayedInSwaggerUi: true`, so it is visible where a person would look.
+
+## Session locks
+
+A person looking at the documentation page can restrict an operation for the agent — for this session only. Each operation block carries an access control next to Try-it-out (styled like Swagger UI, no agent branding), and a session bar under the API info offers the unlock-all reset while locks are active. A reload resets every operation to what the spec declares, because locks live in an in-memory page map that dies with the page.
+
+Lock levels mirror the server vocabulary exactly:
+
+| Lock | Agent experience |
+|---|---|
+| View only | Listed with its spec, direct tool still registered, but every call returns structured `LOCKED`. |
+| Read only | Capped at `read`: reads run, writes are denied with `LOCKED`. |
+| Hidden | Unregistered and unsearchable this session, like spec `hidden`. |
+
+Rules that make locks safe:
+
+- Locks can only tighten. The effective exposure is the tighter of the spec-resolved level and the lock; a lock can never un-hide a hidden operation, un-hold a held write, or grant what the spec withheld. Authorization gating is not a lock — it stays live login state, with no lock control for it.
+- The agent cannot mutate locks. Lock state lives in module state the tools never touch: no tool reads or writes it, no input schema carries a lock field, and there is no set-lock tool. `agentPolicy` reports the effective exposure (`locked: true`, plus which `lock`) so the agent understands a `LOCKED` denial — observation only.
+- The person is never locked out. Locks touch only the agent's capability set; an operation hidden from the agent stays fully operable by hand in the same page.
+
+Lock changes re-derive the tool set through the normal generation mechanism: hiding unregisters the direct tool, unlocking restores it, with no spec reload.
+
+## Shared Try-it-out fields
+
+The agent and the person use the same fields in the same Swagger store — there are no shadow copies, in either direction:
+
+- The agent sees work in progress. `openapi_get_operation` reports `liveValues`: parameter values and request body text the person already typed, read live from the Swagger store at call time and bounded (long values truncated, credential-shaped names never surfaced).
+- The agent can submit work in progress. Executing with empty or partial arguments uses the current UI values for the missing pieces. Explicit arguments always win; the merged set is written back through Swagger's own pipeline, so the populated fields and the response render in Swagger UI's own panels.
+
+Both split-entry flows work on the same fields: the person types half and the agent finishes and submits, or the agent fills values the person reviews before the agent submits. Every tool mutation lands in the normal Swagger store, and every execution path — direct tools, the generic executor, every batch step — records `displayedInSwaggerUi: true`, which is the presence equivalent of a read receipt.
+
+## Audit fingerprint: did an agent call this?
+
+Every agent execution leaves a fingerprint answering "did an agent call this", in two places:
+
+- Server side (demo): the plugin marks whichever operation it is executing (`agentExecution`), and the demo page's request interceptor tags those requests `X-Waypoint-Client: webmcp-agent`. The demo API records the request's pipeline source on every audited write, so `GET /audit-events` shows `webmcp-agent` on agent-made writes and `swagger-ui` on hand-made ones. Within the demo this distinguishes pipeline paths — agent-via-plugin versus person-via-Try-it-out — because the plugin marks its invocations. It is an audit hint, not an identity proof: any HTTP client can send the header.
+- In page: agent-executed requests appear in Swagger UI's own request/response panels (`displayedInSwaggerUi`), so a person watching the docs sees the call and its result where they would look for their own.
+
+Limits, stated honestly: the header is set by page JavaScript and the audit log trusts it; a hostile page or a forged request can lie about source. The fingerprint proves which pipeline the demo server saw, nothing more. Production APIs that need non-repudiation need real authentication, not this header.
 
 ## Result handling
 
@@ -253,4 +300,4 @@ Responses are normalised before they reach the agent. At most 50 headers are kep
 
 ## Error codes
 
-`WEBMCP_UNAVAILABLE`, `SPEC_NOT_READY`, `SPEC_INVALID`, `OPERATION_NOT_FOUND`, `OPERATION_AMBIGUOUS`, `OPERATION_UNSUPPORTED`, `INPUT_INVALID`, `CONTENT_TYPE_UNSUPPORTED`, `AUTH_REQUIRED`, `NETWORK_ERROR`, `CORS_ERROR`, `ABORTED`, `RESPONSE_TOO_LARGE`, `SWAGGER_EXECUTION_ERROR`, `READ_ONLY_MODE`, `OPERATION_DENIED`, `BATCH_TOO_LARGE`, `INTERNAL_ERROR`.
+`WEBMCP_UNAVAILABLE`, `SPEC_NOT_READY`, `SPEC_INVALID`, `OPERATION_NOT_FOUND`, `OPERATION_AMBIGUOUS`, `OPERATION_UNSUPPORTED`, `INPUT_INVALID`, `CONTENT_TYPE_UNSUPPORTED`, `AUTH_REQUIRED`, `LOCKED`, `NETWORK_ERROR`, `CORS_ERROR`, `ABORTED`, `RESPONSE_TOO_LARGE`, `SWAGGER_EXECUTION_ERROR`, `READ_ONLY_MODE`, `OPERATION_DENIED`, `BATCH_TOO_LARGE`, `INTERNAL_ERROR`.
