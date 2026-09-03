@@ -14,6 +14,8 @@ export type WebMcpErrorCode =
   | 'RESPONSE_TOO_LARGE'
   | 'SWAGGER_EXECUTION_ERROR'
   | 'READ_ONLY_MODE'
+  /** A person locked this operation for agents in the docs UI this session. */
+  | 'LOCKED'
   /** The resolved exposure policy hides this operation from agents. */
   | 'OPERATION_DENIED'
   | 'BATCH_TOO_LARGE'

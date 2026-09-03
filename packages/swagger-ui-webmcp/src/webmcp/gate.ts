@@ -17,10 +17,13 @@
 
 import type { CompiledOperation } from '../openapi/types.js';
 import {
+  applySessionLock,
   authSatisfied,
   resolvePolicy,
   type Policy,
   type ResolvedPolicy,
+  type SessionLock,
+  type SessionLocks,
   type ToolExposure
 } from '../policy/index.js';
 import { toolError } from './errors.js';
@@ -31,10 +34,20 @@ export interface GateContext {
   policyResolver?: (op: CompiledOperation) => Policy | undefined;
   /** Scheme names currently authorized in Swagger UI. Read live per call. */
   authorizedSchemes: readonly string[];
+  /**
+   * The page-session lock set, owned by the plugin closure. Read live per
+   * call like authorization: locking in the docs UI flips the next call with
+   * no re-registration. Never populated from tool input.
+   */
+  sessionLocks?: SessionLocks;
+}
+
+export function sessionLockFor(op: CompiledOperation, ctx: GateContext): SessionLock | undefined {
+  return ctx.sessionLocks?.get(op.key);
 }
 
 export function policyFor(op: CompiledOperation, ctx: GateContext): ResolvedPolicy {
-  return resolvePolicy({
+  const resolved = resolvePolicy({
     pageExposure: ctx.pageExposure,
     documentDefault: op.documentAnnotation,
     operation: op.annotation,
@@ -42,6 +55,10 @@ export function policyFor(op: CompiledOperation, ctx: GateContext): ResolvedPoli
     readOnly: op.readOnly,
     trustSpecAnnotations: ctx.trustSpecAnnotations
   });
+  // Session locks compose last and can only tighten: `applySessionLock` never
+  // clears a spec `hidden`, never un-blocks a spec-held write, and never
+  // grants what the spec withheld.
+  return applySessionLock(resolved, sessionLockFor(op, ctx), op.readOnly);
 }
 
 export const operationLabel = (op: CompiledOperation) => `${op.method.toUpperCase()} ${op.path}`;
@@ -49,6 +66,13 @@ export const operationLabel = (op: CompiledOperation) => `${op.method.toUpperCas
 function refusedError(op: CompiledOperation, policy: ResolvedPolicy) {
   if (policy.hidden) {
     return toolError('OPERATION_DENIED', `${operationLabel(op)} is not available to agents on this page.`);
+  }
+  if (policy.locked) {
+    return toolError(
+      'LOCKED',
+      `${operationLabel(op)} is locked for agents this session. ` +
+        'A person restricted it in the documentation page; ask them to unlock it, or proceed by hand in Swagger UI.'
+    );
   }
   return toolError('READ_ONLY_MODE', 'Write operations are not exposed to agents by this page or document.');
 }
@@ -75,6 +99,9 @@ export type Authorization = { ok: true; policy: ResolvedPolicy } | { ok: false; 
 export function authorize(op: CompiledOperation, ctx: GateContext): Authorization {
   const policy = policyFor(op, ctx);
   if (policy.hidden || policy.blocked) return { ok: false, error: refusedError(op, policy) };
+  // `view` locks deny even reads: the operation stays listed with its spec,
+  // but no call goes through this session.
+  if (policy.locked && policy.lock === 'view') return { ok: false, error: refusedError(op, policy) };
   if (!authSatisfied(policy.requiresAuth, ctx.authorizedSchemes)) return { ok: false, error: authError(op, policy) };
   return { ok: true, policy };
 }

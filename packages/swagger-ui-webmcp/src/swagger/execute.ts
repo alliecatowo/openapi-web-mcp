@@ -3,6 +3,7 @@ import { currentServer } from './server.js';
 import { getSpec } from './context.js';
 import { normalizeResponse } from './responses.js';
 import { agentExecution } from './state.js';
+import { mergeWithLiveValues, readLiveValues } from './fields.js';
 
 /**
  * Runs an operation through Swagger UI's own execution path.
@@ -16,8 +17,8 @@ import { agentExecution } from './state.js';
  * Consequences worth knowing about:
  *  - Swagger's action wrappers swallow exceptions and return undefined, so the
  *    result has to be observed in the store rather than awaited directly.
- *  - The store is keyed by operation, so agent-supplied arguments replace what
- *    is currently in that operation's form. Executions are therefore serialised.
+ *  - The store is keyed by operation, so the merged arguments become that
+ *    operation's form state. Executions are therefore serialised.
  */
 
 /** How long to wait for Swagger to record a response before giving up. */
@@ -125,13 +126,19 @@ async function awaitResponse(system: any, op: CompiledOperation, previous: unkno
 export async function executeOperation(
   system: any,
   op: CompiledOperation,
-  input: OperationInvocation,
+  invocation: OperationInvocation,
   signal?: AbortSignal
 ): Promise<ApiExecutionResult> {
   if (signal?.aborted) return fail('ABORTED', 'The operation was aborted.');
 
   const spec = getSpec(system);
   if (!currentServer(system, spec)) return fail('SPEC_INVALID', 'No selected server is available.');
+
+  // Empty or partial arguments fall back to whatever the person already typed
+  // into the operation's Try-it-out fields: explicit arguments always win,
+  // and the merged set is what gets written, sent, and rendered. Either side
+  // of the shared fields can start the work and the other can finish it.
+  const { merged: input } = mergeWithLiveValues(op, invocation, readLiveValues(system, op, { truncate: false }));
 
   // Path parameters are structural: a missing one would silently request a
   // literal "{id}" segment, so they are checked before anything is written.

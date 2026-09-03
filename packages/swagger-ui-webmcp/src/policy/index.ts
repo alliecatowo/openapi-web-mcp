@@ -155,7 +155,17 @@ export interface ResolvedPolicy {
   destructive: boolean;
   /** Which source produced the level, for context reporting and tests. */
   source: 'page' | 'document';
+  /**
+   * True when a person restricted this operation for the agent in the docs UI
+   * this session. Set by `applySessionLock` in the gate, never here: session
+   * locks compose after every spec source and can only tighten.
+   */
+  locked?: boolean;
+  /** Which session lock produced the restriction, when `locked` is true. */
+  lock?: import('./locks.js').SessionLock;
 }
+
+export { applySessionLock, SessionLocks, toSessionLock, type SessionLock } from './locks.js';
 
 /**
  * Of two authorization gates, return the tighter one: no gate < any

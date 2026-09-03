@@ -2,8 +2,9 @@ import { enumerateOperations } from '../openapi/enumerate.js';
 import { getSpec, snapshot, specFingerprint } from '../swagger/context.js';
 import { authorizedSchemes } from '../swagger/auth.js';
 import { executeOperation } from '../swagger/execute.js';
+import { readLiveValues } from '../swagger/fields.js';
 import type { CompiledOperation } from '../openapi/types.js';
-import { authSatisfied, toExposure, type Policy, type ToolExposure } from '../policy/index.js';
+import { authSatisfied, toExposure, type Policy, type SessionLocks, type ToolExposure } from '../policy/index.js';
 import { coreDefinitions } from './core-tools.js';
 import { operationDefinition } from './operation-tool.js';
 import { authorize, authorizeBatch, operationLabel, policyFor, type GateContext } from './gate.js';
@@ -26,6 +27,12 @@ export interface RegistryConfig {
   policyResolver?: (op: CompiledOperation) => Policy | undefined;
   maxBatchSteps?: number;
   /**
+   * The page-session lock set. Owned by the plugin closure, never by tool
+   * input: locks are read live on every gate evaluation, exactly like
+   * authorization state.
+   */
+  sessionLocks?: SessionLocks;
+  /**
    * Reads the page's `webMcp` config on demand.
    *
    * Swagger UI has not finished merging user configuration when a plugin's
@@ -44,6 +51,8 @@ export interface ExposureSummary {
   blocked: number;
   hidden: number;
   unsupported: number;
+  /** Operations a person restricted for the agent this session. */
+  locked: number;
 }
 
 const DEFAULT_MAX_TOOLS = 64;
@@ -53,7 +62,7 @@ export class WebMcpRegistry {
   private generation?: AbortController;
   private fingerprint = '';
   private direct = 0;
-  private summary: ExposureSummary = { toolCount: 0, total: 0, read: 0, write: 0, blocked: 0, hidden: 0, unsupported: 0 };
+  private summary: ExposureSummary = { toolCount: 0, total: 0, read: 0, write: 0, blocked: 0, hidden: 0, unsupported: 0, locked: 0 };
 
   constructor(
     private system: any,
@@ -73,7 +82,9 @@ export class WebMcpRegistry {
       policyResolver: settings.policyResolver,
       // Snapshot per use, never cached: authorizing in Swagger UI must flip
       // the next call from AUTH_REQUIRED to success with no re-registration.
-      authorizedSchemes: authorizedSchemes(this.system).map((scheme) => scheme.name)
+      // Session locks behave the same way: locking flips the next call.
+      authorizedSchemes: authorizedSchemes(this.system).map((scheme) => scheme.name),
+      sessionLocks: settings.sessionLocks
     };
   }
 
@@ -118,25 +129,31 @@ export class WebMcpRegistry {
       exposure: policy.exposure,
       readOnly: op.readOnly,
       destructive: policy.destructive,
-      callable: !policy.hidden && !policy.blocked && authorized,
+      callable: !policy.hidden && !policy.blocked && !(policy.locked && policy.lock === 'view') && authorized,
       requiresAuth: policy.requiresAuth
         ? policy.requiresAuth.any
           ? ('any' as const)
           : [...policy.requiresAuth.schemes]
         : null,
       authorized,
+      // The effective exposure, including this session's human-set locks, so
+      // the agent can make sense of a LOCKED denial. Locks are observable
+      // here and nowhere else: no tool reads or writes lock state.
+      locked: policy.locked === true,
+      lock: policy.lock ?? null,
       declaredIn: policy.source === 'document' ? ('openapi-document' as const) : ('page' as const)
     };
   }
 
   private computeSummary(ops: CompiledOperation[]): ExposureSummary {
-    const summary: ExposureSummary = { toolCount: this.direct, total: ops.length, read: 0, write: 0, blocked: 0, hidden: 0, unsupported: 0 };
+    const summary: ExposureSummary = { toolCount: this.direct, total: ops.length, read: 0, write: 0, blocked: 0, hidden: 0, unsupported: 0, locked: 0 };
     for (const op of ops) {
       const policy = policyFor(op, this.gate);
       if (policy.hidden) summary.hidden += 1;
       else if (policy.blocked) summary.blocked += 1;
       else if (op.readOnly) summary.read += 1;
       else summary.write += 1;
+      if (policy.locked) summary.locked += 1;
       if (!op.supported) summary.unsupported += 1;
     }
     return summary;
@@ -166,7 +183,8 @@ export class WebMcpRegistry {
       read: this.summary.read,
       write: this.summary.write,
       blocked: this.summary.blocked,
-      hidden: this.summary.hidden
+      hidden: this.summary.hidden,
+      locked: this.summary.locked
     };
   }
 
@@ -175,12 +193,22 @@ export class WebMcpRegistry {
     const spec = getSpec(this.system);
     if (!spec || !Object.keys(spec).length) return;
 
-    const fingerprint = specFingerprint(spec);
+    const ops = this.operations();
+    // Session locks are session state, not spec state: a lock change must
+    // re-derive the tool set through this same generation mechanism, so the
+    // lock version joins the spec fingerprint as the generation identity.
+    this.settings().sessionLocks?.prune(ops.map((op) => op.key));
+    const fingerprint = `${specFingerprint(spec)}|locks:${this.settings().sessionLocks?.version ?? 0}`;
     if (fingerprint === this.fingerprint) return;
 
-    const ops = this.operations();
+    // Abort the previous generation BEFORE registering the next one. Tool
+    // names are stable across generations for unchanged operations, so
+    // aborting afterwards would delete the new tools through the shared
+    // names — every spec change would silently drop the tools that did not
+    // change.
+    this.generation?.abort();
     const controller = new AbortController();
-    const previous = this.generation;
+    this.generation = controller;
 
     const cap = this.settings().maxDirectOperationTools ?? DEFAULT_MAX_TOOLS;
     // Very large documents keep discovery and generic execution but register no
@@ -194,8 +222,9 @@ export class WebMcpRegistry {
     );
 
     const finish = () => {
-      previous?.abort();
-      this.generation = controller;
+      // A newer rebuild may have superseded this one while registrations were
+      // in flight; only the current generation records itself.
+      if (this.generation !== controller) return;
       this.fingerprint = fingerprint;
       this.direct = list.length;
       this.summary = this.computeSummary(ops);
@@ -203,7 +232,11 @@ export class WebMcpRegistry {
     };
 
     if (registrations.some((x: any) => x && typeof x.then === 'function')) {
-      Promise.all(registrations).then(finish).catch(() => controller.abort());
+      Promise.all(registrations)
+        .then(finish)
+        .catch(() => {
+          if (this.generation === controller) controller.abort();
+        });
     } else {
       finish();
     }
@@ -285,7 +318,11 @@ export class WebMcpRegistry {
       supported: op.supported,
       unsupportedReason: op.unsupportedReason,
       directTool: this.registrable(op) ? op.toolName : undefined,
-      agentPolicy: this.describePolicy(op)
+      agentPolicy: this.describePolicy(op),
+      // Whatever the person already typed into this operation's Try-it-out
+      // fields, read live from the Swagger store and bounded. Executing with
+      // empty or partial arguments submits these values.
+      liveValues: readLiveValues(this.system, op)
     };
   }
 
