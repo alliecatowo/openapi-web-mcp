@@ -1,0 +1,38 @@
+{
+  "name": "swagger-ui-webmcp",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "build": "npm run build -w swagger-ui-webmcp && npm run build -w demo",
+    "test:e2e": "playwright test",
+    "dev": "npm run dev -w demo"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@types/swagger-ui": "^5.32.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.0",
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "swagger-ui": "5.32.14"
+  },
+  "overrides": {
+    "swagger-ui": {
+      "react": "18.3.1",
+      "react-dom": "18.3.1"
+    }
+  }
+}

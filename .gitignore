@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.reference/
+coverage/
+.vercel/
+.env
+.env.*
+playwright-report/
+test-results/
+.DS_Store
+*.tsbuildinfo
+
+# Derived at build time from apps/demo/public/openapi.yaml
+apps/demo/public/openapi-unannotated.yaml

@@ -1,0 +1,1 @@
+{"framework":"vite","buildCommand":"npm run build -w demo","outputDirectory":"apps/demo/dist","installCommand":"npm ci"}

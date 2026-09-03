@@ -1,0 +1,5 @@
+swagger-ui-webmcp is licensed under Apache-2.0.
+
+The demo uses Swagger UI 5.32.14, Copyright SmartBear Software, licensed under
+Apache-2.0. Swagger UI is an external dependency and is not vendored here.
+
