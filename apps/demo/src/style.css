@@ -22,54 +22,76 @@ body {
   white-space: nowrap;
 }
 
-/* Hero ---------------------------------------------------------------- */
+/* Hero — deliberately small. The endpoints are the product, so the page
+   chrome gets one compact row and gets out of the way. ------------------ */
 
 .hero {
-  background: linear-gradient(180deg, #10233f 0%, #143054 100%);
+  background: var(--navy);
   color: #fff;
-  padding: 38px max(24px, calc((100% - 1180px) / 2)) 34px;
+  padding: 14px max(20px, calc((100% - 1180px) / 2));
   display: flex;
   justify-content: space-between;
-  align-items: flex-end;
-  gap: 24px;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
 }
 
-.eyebrow {
-  font-size: 11px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: #8fc5ff;
-  margin: 0 0 10px;
-  font-weight: 700;
+.hero-copy {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .hero h1 {
-  font-size: 34px;
-  line-height: 1.15;
-  margin: 0 0 8px;
+  font-size: 19px;
+  line-height: 1.2;
+  margin: 0;
   letter-spacing: -0.01em;
 }
 
 .tagline {
   margin: 0;
-  color: #c8d9ee;
-  font-size: 15px;
+  color: #9dc0e8;
+  font-size: 13px;
 }
 
-.session {
-  font-size: 14px;
-  text-align: right;
+.hero-side {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 13px;
+}
+
+.status {
+  color: #9dc0e8;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   white-space: nowrap;
 }
 
-.session button,
-.hero button {
+.status::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #45b97c;
+  flex: none;
+}
+
+.session {
+  white-space: nowrap;
+}
+
+.session button {
   border: 0;
   background: var(--accent);
   color: #08172d;
   border-radius: 6px;
-  padding: 8px 13px;
+  padding: 6px 12px;
   font: inherit;
+  font-size: 13px;
   font-weight: 700;
   margin-left: 8px;
   cursor: pointer;
@@ -79,49 +101,21 @@ body {
   background: #82bbff;
 }
 
-/* Status strip and document switcher ---------------------------------- */
+/* Document bar — one row ------------------------------------------------ */
 
-.strip {
+.bar {
   max-width: 1180px;
-  margin: 18px auto 0;
-  padding: 0 12px;
-  display: grid;
-  gap: 12px;
-}
-
-.notice {
-  padding: 12px 16px;
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  font-size: 14px;
+  margin: 0 auto;
+  padding: 10px max(20px, calc((100% - 1180px) / 2));
   display: flex;
-  gap: 9px;
   align-items: center;
-}
-
-.notice #statusDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #45b97c;
-  flex: none;
-}
-
-.hint {
-  color: var(--muted);
-  margin-left: auto;
-  font-size: 12px;
-}
-
-.switcher {
-  padding: 14px 16px;
+  gap: 10px;
+  flex-wrap: wrap;
   background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border-bottom: 1px solid var(--line);
 }
 
-.switcher-label {
+.bar-label {
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -129,18 +123,16 @@ body {
   font-weight: 700;
 }
 
-.switcher-actions {
+.bar-chips {
   display: flex;
+  gap: 6px;
   flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  margin-top: 9px;
 }
 
 .chip {
   font: inherit;
   font-size: 13px;
-  padding: 7px 12px;
+  padding: 5px 11px;
   border-radius: 20px;
   border: 1px solid var(--line);
   background: #f8fafc;
@@ -177,16 +169,16 @@ body {
 .spec-form input {
   font: inherit;
   font-size: 13px;
-  padding: 7px 10px;
+  padding: 5px 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  min-width: 260px;
+  min-width: 230px;
 }
 
 .spec-form button {
   font: inherit;
   font-size: 13px;
-  padding: 7px 13px;
+  padding: 5px 12px;
   border-radius: 6px;
   border: 1px solid var(--navy);
   background: var(--navy);
@@ -194,69 +186,124 @@ body {
   cursor: pointer;
 }
 
-.switcher-note {
-  margin: 10px 0 0;
-  font-size: 12.5px;
-  color: var(--muted);
-}
+/* Collapsed explainer — available, never in the way ---------------------- */
 
-/* Install snippet ------------------------------------------------------ */
-
-.install {
+.about {
   max-width: 1180px;
-  margin: 14px auto 0;
-  padding: 18px 20px;
+  margin: 0 auto;
+  padding: 0 max(20px, calc((100% - 1180px) / 2));
   background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border-bottom: 1px solid var(--line);
 }
 
-.install h2 {
-  margin: 0 0 12px;
-  font-size: 16px;
+.about > summary {
+  cursor: pointer;
+  padding: 9px 0;
+  font-size: 13px;
+  color: #3f5a7d;
+  font-weight: 600;
+  list-style: revert;
 }
 
-.install pre {
+.about-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 26px;
+  padding: 4px 0 18px;
+}
+
+.about h2 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.about h2 + p + h2,
+.about p + h2 {
+  margin-top: 16px;
+}
+
+.about pre {
   margin: 0;
-  padding: 14px 16px;
+  padding: 12px 14px;
   background: var(--navy);
   color: #dbe7f5;
   border-radius: 8px;
   overflow-x: auto;
-  font-size: 12.5px;
+  font-size: 12px;
   line-height: 1.6;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-.install .hl {
+.about .hl {
   color: #ffd479;
 }
 
-.install p {
-  margin: 12px 0 0;
-  font-size: 13.5px;
+.about p,
+.about li {
+  font-size: 13px;
   color: #4a5b70;
-  max-width: 72ch;
+  max-width: 68ch;
 }
 
-/* Swagger UI sits inside the same page width ---------------------------- */
+.about p {
+  margin: 10px 0 0;
+}
+
+.about ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.about code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: #f1f5fa;
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+/* Swagger UI ------------------------------------------------------------ */
 
 #swagger-ui {
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
-@media (max-width: 760px) {
-  .hero {
-    display: block;
-  }
+/*
+ * Swagger UI 5.32 paints the copy-to-clipboard glyph with an unscoped
+ * `background-color: ButtonText` forced-colors fallback, which renders as a
+ * mangled block in normal colour modes. Replace it with a plain Lucide copy
+ * icon we control, masked so the colour is ours.
+ */
+.swagger-ui .copy-to-clipboard {
+  background: #6b7a90;
+  border-radius: 5px;
+}
 
-  .session {
-    text-align: left;
-    margin-top: 18px;
-  }
+.swagger-ui .copy-to-clipboard:hover {
+  background: #55637a;
+}
 
-  .hint {
-    display: none;
+.swagger-ui .copy-to-clipboard button {
+  background: none;
+  background-color: #fff;
+  forced-color-adjust: auto;
+  -webkit-mask-image: var(--copy-icon);
+  mask-image: var(--copy-icon);
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 15px 15px;
+  mask-size: 15px 15px;
+}
+
+:root {
+  --copy-icon: url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect width='14' height='14' x='8' y='8' rx='2' ry='2'/><path d='M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2'/></svg>");
+}
+
+@media (max-width: 860px) {
+  .about-body {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .spec-form {

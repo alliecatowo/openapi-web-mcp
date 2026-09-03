@@ -169,7 +169,11 @@ test.describe('Swagger UI without WebMCP', () => {
     await expect(page.locator('.swagger-ui')).toBeVisible({ timeout: 15000 });
     await expect(page.locator('#session')).toContainText('signed out');
 
-    expect((await page.request.get('/api/sandbox/projects')).status()).toBe(401);
+    // Reads work signed out: the demo must be useful the moment it loads.
+    expect((await page.request.get('/api/sandbox/projects')).status()).toBe(200);
+    // So do writes. Only the three scheme-gated operations require anything.
+    expect((await page.request.post('/api/sandbox/projects', { data: { name: 'Signed out write' } })).status()).toBe(201);
+
     await signIn(page);
     const me = await page.evaluate(async () => {
       const response = await fetch('/api/sandbox/me', { credentials: 'include' });

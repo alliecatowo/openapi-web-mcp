@@ -175,19 +175,23 @@ export function handleRequest(req: ApiRequest): ApiResponse {
   }
   const rest = parts.slice(1);
 
-  // Three operations are gated on machine-authorizable schemes instead of the
-  // demo session, so the SEE-vs-CALL story can be shown with Swagger UI's own
-  // authorize dialog: the agent sees the tool, calls it, gets AUTH_REQUIRED,
-  // the human authorizes, and the same call succeeds. Everything else still
-  // needs the session cookie from the page's Sign in button.
+  // Exactly three operations require authorization, and each one declares the
+  // scheme it needs in the OpenAPI document, so Swagger UI draws its normal
+  // padlock on them and nowhere else. That is the whole SEE-vs-CALL demo: the
+  // agent sees the tool, calls it, gets AUTH_REQUIRED, a human authorizes in
+  // Swagger's own dialog, and the same call succeeds.
+  //
+  // Everything else is open, deliberately. The demo has to be useful the
+  // second it loads — a judge or an agent can read, write, and explore without
+  // signing in or pasting anything. The demo session still exists and is still
+  // shared with the agent (it changes `GET /me` and is recorded in the audit
+  // log), but it never blocks a call: an auth wall in front of the thing being
+  // demonstrated is worse than no demo.
   const gatedScheme =
     rest[0] === 'reports' && rest[1] === 'usage' && method === 'GET' ? 'bearer'
     : rest[0] === 'exports' && rest.length === 1 && method === 'POST' ? 'header-key'
     : rest[0] === 'exports' && rest.length === 2 && method === 'GET' ? 'query-key'
     : null;
-  if (!gatedScheme && !signedIn(req)) {
-    return fail(401, 'NOT_AUTHENTICATED', 'Sign in to the demo to use this endpoint.');
-  }
 
   const store = storeFor(environment);
   const source = sourceOf(req);

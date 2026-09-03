@@ -41,7 +41,10 @@ export default function handler(req: NodeLikeRequest, res: NodeLikeResponse): vo
   const secure = headers['x-forwarded-proto'] === 'https';
 
   for (const [name, value] of Object.entries(result.headers ?? {})) {
-    res.setHeader(name, name.toLowerCase() === 'set-cookie' && secure ? `${value} Secure;` : value);
+    // `; Secure` — with the separator. Appending " Secure;" instead folded the
+    // flag into the Path attribute (`Path=/ Secure`), which never matches a
+    // request path, so the browser silently dropped the session cookie.
+    res.setHeader(name, name.toLowerCase() === 'set-cookie' && secure ? `${value}; Secure` : value);
   }
   res.setHeader('Cache-Control', 'no-store');
   res.statusCode = result.status;

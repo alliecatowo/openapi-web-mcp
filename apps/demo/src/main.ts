@@ -70,7 +70,9 @@ const ui = SwaggerUI({
     exposure: 'write'
   },
   onComplete: () => {
-    statusText.textContent = 'Swagger UI ready · WebMCP activates automatically when available';
+    statusText.textContent = (document as any).modelContext
+      ? 'WebMCP active'
+      : 'Swagger ready · WebMCP activates when the browser supports it';
   }
 } as any);
 
@@ -79,7 +81,7 @@ const ui = SwaggerUI({
 
 /** Load a different OpenAPI document into the live Swagger session. */
 function loadSpec(url: string) {
-  statusText.textContent = `Loading ${url}…`;
+  statusText.textContent = 'Loading document…';
   (ui as any).specActions.updateUrl(url);
   (ui as any).specActions.download(url);
   for (const chip of document.querySelectorAll('.chip')) {
