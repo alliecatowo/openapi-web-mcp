@@ -10,10 +10,6 @@ What I personally still have to do before this entry is safely submitted.
 
 - [ ] Open the live demo in ChatGPT's in-app browser (not just Chrome) and confirm the tools register and one read and one write actually succeed. This is the exact environment the rules name for judges and it has not been verified end to end.
 
-## Repository
-
-- [ ] Confirm the latest push is green in GitHub Actions.
-
 ## Demo recording
 
 - [ ] Set up the exact starting state in DEMO.md § *Exact starting application state*.
@@ -50,4 +46,5 @@ What I personally still have to do before this entry is safely submitted.
 - [ ] Load <https://openapi-web-mcp.vercel.app> in a fresh private window: sign in works, tools register, a read and a write succeed.
 - [ ] Confirm the YouTube video is publicly playable while signed out.
 - [ ] Run `git rev-parse HEAD` and record the submitted SHA in SUBMISSION.md § 3.
+- [ ] Confirm GitHub Actions is green on that final SHA (`gh run list --limit 1`). It was green on `4b2591e`; re-check after the YouTube URL and SHA are committed.
 - [ ] Confirm the deployed Vercel build matches that SHA.
