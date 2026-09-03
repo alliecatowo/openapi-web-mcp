@@ -85,6 +85,83 @@ async function agentExecute(page: Page, name: string, input: any) {
   );
 }
 
+/** Expand one operation block and switch it to Try-it-out, returning the block. */
+function opBlock(page: Page, method: string, path: string) {
+  return page.locator(`.opblock[data-opblock-method="${method}"][data-opblock-path="${path}"]`);
+}
+
+async function expandOp(page: Page, method: string, path: string) {
+  // Tag the wanted block with stable attributes (Swagger gives it none), so
+  // later locators address exactly one operation.
+  await page.evaluate(
+    ([wantedMethod, wantedPath]) => {
+      const blocks = [...document.querySelectorAll('.opblock')];
+      const target = blocks.find(
+        (block) =>
+          block.querySelector('.opblock-summary-method')?.textContent?.trim().toUpperCase() === wantedMethod &&
+          block.querySelector('.opblock-summary-path')?.textContent?.trim() === wantedPath
+      );
+      if (!target) throw new Error(`no opblock for ${wantedMethod} ${wantedPath}`);
+      target.setAttribute('data-opblock-method', wantedMethod);
+      target.setAttribute('data-opblock-path', wantedPath);
+    },
+    [method, path] as const
+  );
+  const block = opBlock(page, method, path);
+  // A trusted click: the summary is a plain div with a React handler, which a
+  // synthetic DOM click does not reliably trip.
+  if (!(await block.evaluate((el) => el.classList.contains('is-open')))) {
+    await block.locator('.opblock-summary').click();
+  }
+  await block.getByRole('button', { name: 'Try it out' }).click();
+  return block;
+}
+
+const lockSelect = (page: Page, method: string, path: string) =>
+  page.locator(`[data-webmcp-lock="${method} ${path}"] select`);
+
+async function agentSearch(page: Page, input: any) {
+  return page.evaluate(
+    (args) => (window as any).__webmcpTools.get('openapi_search_operations').execute(args, {}),
+    input
+  );
+}
+
+/** What Swagger's store currently holds for one Try-it-out field. */
+async function storedParam(page: Page, method: string, path: string, name: string, location: string) {
+  return page.evaluate(
+    ([m, p, n, l]) =>
+      (window as any).__ui.getSystem().specSelectors.parameterWithMeta([p, m.toLowerCase()], n, l)?.get?.('value'),
+    [method, path, name, location] as const
+  );
+}
+
+/**
+ * Fill a Try-it-out field and wait until the value sticks in Swagger's store.
+ * Swagger resolves operation subtrees asynchronously after load; a fill that
+ * lands before a remount is dropped by React, so retry until the store
+ * reflects the value.
+ */
+async function fillParam(page: Page, block: any, method: string, path: string, name: string, location: string, value: string) {
+  const input = block.locator(`tr[data-param-name="${name}"][data-param-in="${location}"] input`);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await input.fill(value);
+    await page.waitForTimeout(250);
+    if ((await storedParam(page, method, path, name, location)) === value) return;
+  }
+  throw new Error(`param ${location}.${name} did not stick in the Swagger store`);
+}
+
+async function fillBody(page: Page, block: any, value: string) {
+  const area = block.locator('.body-param textarea');
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await area.fill(value);
+    await page.waitForTimeout(250);
+    if ((await area.inputValue()) === value) return;
+  }
+  throw new Error('request body did not stick');
+}
+
 test.describe('Swagger UI without WebMCP', () => {
   test('remains an ordinary, fully usable documentation page', async ({ page }) => {
     await page.goto('/');
@@ -455,5 +532,215 @@ test.describe('Document-declared policy', () => {
       return tool.execute({ operation: 'bulkUpdateTasks' }, {});
     });
     expect(detail.agentPolicy).toMatchObject({ callable: true, declaredIn: 'page' });
+  });
+});
+
+test.describe('Session locks in the docs UI', () => {
+  test.beforeEach(async ({ page }) => {
+    await withWebMcp(page);
+    await page.goto('/');
+    await webmcpReady(page);
+    await signInWithWebmcp(page);
+    await resetDemoData(page);
+  });
+
+  test('view-only: the operation stays listed with its spec but calls return LOCKED', async ({ page }) => {
+    await expect(lockSelect(page, 'GET', '/projects')).toHaveValue('full');
+
+    await lockSelect(page, 'GET', '/projects').selectOption('view');
+
+    const search = await agentSearch(page, { query: 'listProjects' });
+    expect(search.operations[0].agentPolicy).toMatchObject({ callable: false, locked: true, lock: 'view' });
+    expect(search.operations[0].summary).toBeTruthy();
+
+    const denied = await agentExecute(page, 'openapi_execute_operation', { operation: 'listProjects' });
+    expect(denied.error.code).toBe('LOCKED');
+
+    // SEE stays: the direct tool is still registered while CALL fails.
+    const direct = await page.evaluate(() => (window as any).__findTool('api.listProjects.'));
+    expect(direct).toBeTruthy();
+    expect(await agentExecute(page, direct, {})).toMatchObject({ error: { code: 'LOCKED' } });
+
+    // The session bar names the restriction and the person can undo it.
+    await expect(page.locator('[data-webmcp-session-locks]')).toContainText('1 operation');
+    await lockSelect(page, 'GET', '/projects').selectOption('full');
+    expect((await agentExecute(page, 'openapi_execute_operation', { operation: 'listProjects' })).ok).toBe(true);
+  });
+
+  test('read-only: reads on the operation run, writes are denied', async ({ page }) => {
+    await lockSelect(page, 'DELETE', '/projects/{projectId}').selectOption('read');
+
+    const denied = await agentExecute(page, 'openapi_execute_operation', {
+      operation: 'deleteProject',
+      path: { projectId: 'prj_alpha' }
+    });
+    expect(denied.error.code).toBe('LOCKED');
+
+    expect((await agentExecute(page, 'openapi_execute_operation', { operation: 'listProjects' })).ok).toBe(true);
+  });
+
+  test('hidden: unregistered and unsearchable until the reset-all', async ({ page }) => {
+    await lockSelect(page, 'GET', '/projects').selectOption('hidden');
+
+    await expect
+      .poll(async () => toolNames(page), { timeout: 10000 })
+      .not.toEqual(expect.arrayContaining([expect.stringMatching(/^api\.listProjects\./)]));
+
+    const search = await agentSearch(page, { query: 'listProjects' });
+    expect(search.operations).toHaveLength(0);
+
+    const denied = await agentExecute(page, 'openapi_execute_operation', { operation: 'listProjects' });
+    expect(denied.error.code).toBe('OPERATION_NOT_FOUND');
+
+    await page.locator('.sw-webmcp-resetbtn').click();
+    await expect
+      .poll(async () => toolNames(page), { timeout: 10000 })
+      .toEqual(expect.arrayContaining([expect.stringMatching(/^api\.listProjects\./)]));
+    expect((await agentExecute(page, 'openapi_execute_operation', { operation: 'listProjects' })).ok).toBe(true);
+  });
+
+  test('locks are session state: a reload resets to the spec', async ({ page }) => {
+    await lockSelect(page, 'GET', '/projects').selectOption('view');
+    expect((await agentExecute(page, 'openapi_execute_operation', { operation: 'listProjects' })).error.code).toBe(
+      'LOCKED'
+    );
+
+    await page.reload();
+    await webmcpReady(page);
+
+    const search = await agentSearch(page, { query: 'listProjects' });
+    expect(search.operations[0].agentPolicy).toMatchObject({ callable: true, locked: false });
+    await expect(lockSelect(page, 'GET', '/projects')).toHaveValue('full');
+  });
+
+  test('no tool input anywhere can set locks', async ({ page }) => {
+    const schemas = await page.evaluate(() =>
+      [...(window as any).__webmcpTools.entries()].map(([name, tool]: any) => [name, JSON.stringify(tool.inputSchema)])
+    );
+    for (const [name, schema] of schemas as Array<[string, string]>) {
+      expect(schema).not.toMatch(/"lock/i);
+      expect(name.toLowerCase()).not.toContain('lock');
+    }
+  });
+
+  test('a hidden-from-agent operation stays fully operable by hand', async ({ page }) => {
+    await lockSelect(page, 'GET', '/projects').selectOption('hidden');
+    expect((await agentExecute(page, 'openapi_execute_operation', { operation: 'listProjects' })).error.code).toBe(
+      'OPERATION_NOT_FOUND'
+    );
+
+    const block = await expandOp(page, 'GET', '/projects');
+    await block.getByRole('button', { name: 'Execute', exact: true }).click();
+    await expect(block.locator('.responses-wrapper')).toContainText('200', { timeout: 15000 });
+  });
+});
+
+test.describe('Shared Try-it-out fields', () => {
+  test.beforeEach(async ({ page }) => {
+    await withWebMcp(page);
+    await page.goto('/');
+    await webmcpReady(page);
+    await signInWithWebmcp(page);
+    await resetDemoData(page);
+  });
+
+  test('the agent sees what the person already typed', async ({ page }) => {
+    const block = await expandOp(page, 'GET', '/projects');
+    await fillParam(page, block, 'GET', '/projects', 'q', 'query', 'checkout');
+
+    const detail = await page.evaluate(async () => {
+      const tool = (window as any).__webmcpTools.get('openapi_get_operation');
+      return tool.execute({ operation: 'listProjects' }, {});
+    });
+    expect(detail.liveValues).toMatchObject({ query: { q: 'checkout' } });
+  });
+
+  test('empty agent args submit the UI values', async ({ page }) => {
+    const block = await expandOp(page, 'GET', '/projects');
+    await fillParam(page, block, 'GET', '/projects', 'q', 'query', 'zzz-no-such-project-zzz');
+
+    // Without the merge this would list every project; with it, the typed
+    // filter applies and nothing matches.
+    const result = await agentExecute(page, 'openapi_execute_operation', { operation: 'listProjects' });
+    expect(result.ok).toBe(true);
+    expect(result.response.body.projects).toHaveLength(0);
+    expect(result.displayedInSwaggerUi).toBe(true);
+  });
+
+  test('partial args merge: the UI supplies the path id', async ({ page }) => {
+    const block = await expandOp(page, 'GET', '/projects/{projectId}');
+    await fillParam(page, block, 'GET', '/projects/{projectId}', 'projectId', 'path', 'prj_alpha');
+
+    const result = await agentExecute(page, 'openapi_execute_operation', { operation: 'getProject' });
+    expect(result.ok).toBe(true);
+    expect(result.response.body.id).toBe('prj_alpha');
+  });
+
+  test('agent-filled values appear in the UI inputs before execution renders', async ({ page }) => {
+    const block = await expandOp(page, 'GET', '/projects');
+    const input = block.locator('tr[data-param-name="q"][data-param-in="query"] input');
+
+    const result = await agentExecute(page, 'openapi_execute_operation', {
+      operation: 'listProjects',
+      query: { q: 'agent-typed-text' }
+    });
+    expect(result.ok).toBe(true);
+    await expect(input).toHaveValue('agent-typed-text');
+  });
+
+  test('a UI-typed body is submitted when the agent passes none', async ({ page }) => {
+    const block = await expandOp(page, 'POST', '/projects');
+    await fillBody(page, block, '{"name":"UI seeded project"}');
+
+    const result = await agentExecute(page, 'openapi_execute_operation', { operation: 'createProject' });
+    expect(result.ok).toBe(true);
+    expect(result.response.status).toBe(201);
+    expect(result.response.body.name).toBe('UI seeded project');
+  });
+});
+
+test.describe('Audit fingerprint, both directions', () => {
+  test.beforeEach(async ({ page }) => {
+    await withWebMcp(page);
+    await page.goto('/');
+    await webmcpReady(page);
+    await signInWithWebmcp(page);
+    await resetDemoData(page);
+  });
+
+  async function latestAudit(page: Page, action: string) {
+    return page.evaluate(async (wanted) => {
+      const response = await fetch('/api/sandbox/audit-events?limit=50', { credentials: 'include' });
+      const body = await response.json();
+      return body.events.filter((event: any) => event.action === wanted).at(-1);
+    }, action);
+  }
+
+  test('human Try-it-out writes are logged as swagger-ui', async ({ page }) => {
+    const block = await expandOp(page, 'POST', '/projects');
+    await fillBody(page, block, '{"name":"Human-written project"}');
+    await block.getByRole('button', { name: 'Execute', exact: true }).click();
+    await expect(block.locator('.responses-wrapper')).toContainText('201', { timeout: 15000 });
+
+    expect(await latestAudit(page, 'project.created')).toMatchObject({ source: 'swagger-ui' });
+  });
+
+  test('every step of an agent batch is fingerprinted webmcp-agent', async ({ page }) => {
+    const batch = await agentExecute(page, 'openapi_execute_batch', {
+      steps: [
+        { operation: 'createProject', body: { name: 'Batched one' } },
+        { operation: 'createProject', body: { name: 'Batched two' } }
+      ]
+    });
+    expect(batch.succeeded).toBe(2);
+
+    const events = await page.evaluate(async () => {
+      const response = await fetch('/api/sandbox/audit-events?limit=50', { credentials: 'include' });
+      const body = await response.json();
+      return body.events.filter((event: any) => event.action === 'project.created').slice(-2);
+    });
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ source: 'webmcp-agent' });
+    expect(events[1]).toMatchObject({ source: 'webmcp-agent' });
   });
 });
