@@ -273,7 +273,7 @@ The dev server serves the demo API in-process through the same router the deploy
 npm run typecheck      # tsc -b
 npm test               # 107 unit tests (vitest)
 npm run build          # plugin + demo
-npm run test:e2e       # 33 Playwright end-to-end tests
+npm run test:e2e       # 34 Playwright end-to-end tests
 ```
 
 CI runs all four on every push.
