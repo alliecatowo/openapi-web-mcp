@@ -61,9 +61,19 @@ const fail = (status: number, code: string, message: string, details?: unknown):
 
 const signedIn = (req: ApiRequest) => Boolean(req.headers.cookie?.includes(SESSION_COOKIE));
 
-/** Agent traffic arrives with Swagger UI's own fetch, so we tag it for the audit log. */
+/**
+ * Which pipeline served this request, for the audit log. The plugin marks its
+ * own invocations (see `agentExecution`): the demo page's request interceptor
+ * tags those requests `X-Waypoint-Client: webmcp-agent`, and everything else
+ * — a person using Try it out — arrives untagged. The comparison is
+ * case-insensitive so a proxy that rewrites header casing cannot silently
+ * reclassify traffic. This distinguishes pipeline paths within the demo; it
+ * is an audit hint, not an identity proof — any client can send the header.
+ */
 const sourceOf = (req: ApiRequest) =>
-  req.headers['x-waypoint-client'] === 'webmcp-agent' ? ('webmcp-agent' as const) : ('swagger-ui' as const);
+  (req.headers['x-waypoint-client'] ?? '').trim().toLowerCase() === 'webmcp-agent'
+    ? ('webmcp-agent' as const)
+    : ('swagger-ui' as const);
 
 function segments(path: string): string[] {
   return path.split('/').filter(Boolean);
