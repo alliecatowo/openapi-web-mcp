@@ -1,7 +1,7 @@
 # Submission description
 
-- **Live demo:** _add at submission time_
-- **Repository:** _add at submission time_
+- **Live demo:** https://openapi-web-mcp.vercel.app
+- **Repository:** https://github.com/alliecatowo/openapi-web-mcp
 - **Video:** _add at submission time_
 
 ## What it is
