@@ -18,46 +18,49 @@ Installation is one import and one plugin entry in an existing Swagger UI config
 
 Five core tools are always registered — `openapi_get_context`, `openapi_search_operations`, `openapi_get_operation`, `openapi_execute_operation`, and `openapi_execute_batch` — so an agent has something usable even for documents too large for per-operation tools. Each exposed operation additionally gets a direct `api.<safe-name>.<generation-hash>` tool, regenerated whenever the loaded document changes.
 
-`openapi_execute_batch` runs several operations in order under a single human approval. Every step is resolved and policy-checked before any step executes, so a batch never half-applies a plan the user would have refused.
+`openapi_execute_batch` runs several operations in order with no page prompts. Every step is resolved and exposure-checked before any step executes, so a batch never half-applies a plan containing a step the agent may not call. The tool registers with `destructiveHint: true` and its full plan is visible in the input schema, so the WebMCP client gates the invocation as one unit.
 
 ## The part we think is new: `x-webmcp`
 
-The page owner and the API owner are usually different people, and the page owner knows least about which endpoints are dangerous. So the agent permission vocabulary lives in the OpenAPI document, next to the endpoint it describes:
+The page owner and the API owner are usually different people, and the page owner knows least about which endpoints are dangerous. So the agent authorization vocabulary lives in the OpenAPI document, next to the endpoint it describes:
 
 ```yaml
 paths:
   /projects/{projectId}:
     delete:
       x-webmcp:
-        policy: ask-first
+        tool: write
         destructive: true
-        reason: Permanently removes a project and all of its tasks.
+  /reports/usage:
+    get:
+      security:
+        - bearerAuth: []
+      x-webmcp:
+        tool: read
+        requiresAuth: bearerAuth
   /billing/charges:
     post:
       x-webmcp:
-        policy: deny
-        reason: Payments are out of scope for agents on this documentation page.
+        tool: hidden
 ```
 
-An OpenAPI document is untrusted input, so this is built as a ratchet rather than a switch. Both the page's `permissionMode` and the document's annotation reduce to a decision on the lattice `allow < confirm < block`, and by default the stricter one wins: a document can tighten the page's policy but never loosen it. Unrecognised annotation values are dropped rather than guessed at, so a hostile annotation degrades to "no annotation". A publisher who authors both page and document can opt into `trustSpecAnnotations: true`, and even then `policy: deny` still withholds the operation and `destructive: true` still forces a human confirmation.
+The declaration says what each operation *is* for agents — a READ tool, a WRITE tool, HIDDEN — and optionally what client auth state its calls require. An OpenAPI document is untrusted input, so this is built as a ratchet rather than a switch. Both the page's `exposure` and the document's `tool` reduce to a level on the lattice `hidden < read < write`, and by default the tighter one wins: a document can hide operations or hold writes at read, but never loosen the page. Unrecognised annotation values are dropped rather than guessed at, so a hostile annotation degrades to "no annotation". A publisher who authors both page and document can opt into `trustSpecAnnotations: true`, and even then `tool: hidden` still removes the operation. There are no legacy aliases for the old consent vocabulary — old keys are ignored, so annotations always mean what they say now.
 
-`policy: deny` withholds an operation entirely — it is absent from search, inspection, execution, and registration, so the agent has no evidence it exists. A human can still call it in Swagger UI on the same page. A blocked-but-visible operation is different: the agent can see it and see why it cannot use it, which is what lets it say so instead of retrying.
+`tool: hidden` removes an operation entirely — it is absent from search, inspection, execution, and registration, so the agent has no evidence it exists. A human can still call it in Swagger UI on the same page. A held-but-visible operation is different: the agent can see it and see why it cannot use it, which is what lets it say so instead of retrying. An authorization-gated operation is a third state: the agent sees it, sees which schemes it needs, and gets a structured `AUTH_REQUIRED` until a human authorizes through Swagger UI's normal dialog — SEE vs CALL, evaluated against live client state at call time.
 
 ## The human half
 
-Consent happens in an in-page Agent Console rather than a native dialog. It shows the selected server, the page mode, whether spec policy is authoritative, a ledger of the capability set, and a live log of every agent call with its outcome and duration. When an operation needs approval, a card names the operation, lists the arguments, shows the publisher's `reason` labelled "Stated by the API document" — rendered as text, because it is untrusted — and offers Allow once, Always allow, and Deny. Always allow is withheld for destructive operations.
+There is deliberately no agent-only UI on the page — no consent prompts, no allow-once/allow-always, no client-side tool locking. Permission UX belongs to the WebMCP client (the agent host), which gates invocations using the annotations each tool was registered with. The page's interface to the client is registration visibility plus MCP annotations plus structured errors, and agent calls remain visible through Swagger UI's own response panels rather than a parallel console.
 
-This replaces `window.confirm`, which blocks the event loop and would stall the agent's own tool call, cannot show the arguments being approved, and has no memory, so it trains people to click through.
-
-The publisher's `reason` prose is deliberately kept out of `agentPolicy` and every other model-readable surface. The agent learns *that* a person will be asked; the argument for saying yes goes to the person.
+The demo story is therefore shared state, not approvals: a developer signs in, picks an environment, authorizes schemes in the normal dialog, and the agent's next call follows all of it automatically.
 
 ## Safety properties
 
-OpenAPI prose and API responses are untrusted and never enter privileged tool metadata. Auth values never enter tool inputs or results; credential-shaped parameter and header names are excluded and response headers redacted. No tool can name a URL — every call resolves against the currently selected Swagger server. Direct tools, the generic executor, and the batch executor all pass through a single authorization function, so there is exactly one place policy is evaluated and one place a human is asked. Responses are bounded to about 50 KB, binary bodies are described rather than inlined, and `AbortSignal` is honoured.
+OpenAPI prose and API responses are untrusted and never enter privileged tool metadata. Auth values never enter tool inputs or results; credential-shaped parameter and header names are excluded and response headers redacted. No tool can name a URL — every call resolves against the currently selected Swagger server. Direct tools, the generic executor, and the batch executor all pass through a single authorization function evaluated at call time against live auth state, so there is exactly one place exposure is enforced and it never prompts. Responses are bounded to about 50 KB, binary bodies are described rather than inlined, and `AbortSignal` is honoured.
 
 ## The demo
 
-A fictional Waypoint Projects API with 28 annotated operations, backed by one shared stateful router used by both the local dev server and the deployed functions, with separate sandbox and production data stores. It exercises every HTTP method, path/query/header parameters, repeated array query parameters, cursor pagination, `If-Match` optimistic concurrency returning 409, an async 202 job with polling, a 207 multi-status bulk update, a multipart upload deliberately left unsupported as a direct tool, and deliberate 401/404/422 paths. Its audit log records whether each write came from Swagger UI or from the agent. The page can also load an unannotated copy of the same document, or any OpenAPI URL, and `?maxTools=N` demonstrates the large-document fallback.
+A fictional Waypoint Projects API with 28 annotated operations, backed by one shared stateful router used by both the local dev server and the deployed functions, with separate sandbox and production data stores. It exercises every HTTP method, path/query/header parameters, repeated array query parameters, cursor pagination, `If-Match` optimistic concurrency returning 409, an async 202 job with polling, a 207 multi-status bulk update, a multipart upload deliberately left unsupported as a direct tool, hidden operations, a write held at read, three `requiresAuth` gates (HTTP bearer on the usage report, header API key on export creation, query API key on export status), and deliberate 401/404/422 paths. Its audit log records whether each write came from Swagger UI or from the agent. The page can also load an unannotated copy of the same document, or any OpenAPI URL, and `?maxTools=N` demonstrates the large-document fallback.
 
 ## Notes for judging
 

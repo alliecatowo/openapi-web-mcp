@@ -4,8 +4,7 @@ Target length 2:50. One browser window, one Swagger UI page, one agent side pane
 
 ## Before recording
 
-- `npm run dev`, open the demo, and confirm the Agent Console appears bottom-right with a tool count.
-- Loaded document: **Waypoint** (annotated). Server dropdown: **Sandbox**. Signed out.
+- `npm run dev`, open the demo. Loaded document: **Waypoint** (annotated). Server dropdown: **Sandbox**. Signed out, nothing authorized.
 - Reset the demo data (`POST /admin/reset-demo`) so the audit log starts short.
 - Confirm agent-driven writes land in `GET /audit-events` with source `webmcp-agent`. The demo API reads the `X-Waypoint-Client: webmcp-agent` request header to distinguish agent traffic from a human using Try it out.
 
@@ -25,25 +24,29 @@ Open the agent panel. Show the tool list: `api.listProjects.<hash>`, `api.create
 
 "Those came from the OpenAPI document this page just loaded. No connector, no MCP server, no token pasted anywhere."
 
-Point at the Agent Console: selected server, page mode, and the ledger — direct, ask first, blocked, withheld.
+Show the annotations: reads carry `readOnlyHint`, writes don't, the delete carries `destructiveHint`.
+
+"The page doesn't ask me anything — permission UX is the agent client's job. The page declares what each operation is, and the client decides what to confirm."
 
 **0:45 — 1:05 · A read runs straight through**
 
 Ask: *"What projects are active in this workspace?"*
 
-The answer arrives. The Agent Console logs `GET /projects` with a status and a duration.
+The answer arrives with a receipt flag showing it rendered in Swagger UI's own response panel.
 
-"A read under this policy needs no permission, so it just runs — and it is still on the record."
+"A read needs no authorization, so it just runs — and it is still on the record, in Swagger UI itself."
 
-**1:05 — 1:40 · A write stops for a person**
+**1:05 — 1:40 · SEE vs CALL: the agent sees it, but can't call it**
 
-Ask: *"Register a webhook at https://hooks.example.com/waypoint for task events."*
+Ask: *"Show me the usage report."*
 
-A consent card appears in the console. Read it out: the operation `POST /webhooks`, the arguments, and the line under **Stated by the API document** — "Sends future API events to an external URL, so a human confirms the destination."
+The agent reports the operation exists, needs `bearerAuth`, and returns `AUTH_REQUIRED`. Show the search result: listed, correctly annotated, `callable: false`.
 
-"That sentence is in the OpenAPI document, written by the team that owns the API. It is shown to me, not to the model."
+"Seeing is not calling. The document says this endpoint needs bearer authorization, and nobody has authorized yet."
 
-Expand **Review arguments** to show the exact JSON. Click **Allow once**. The call runs and appears in the log.
+Click **Authorize** in Swagger UI, paste the demo bearer token from the page (`waypoint-demo-bearer`), Close. Ask again. The same call now returns 200.
+
+"I authorized in the normal Swagger dialog — the same one I'd use for Try it out. The agent's next call follows the page's live state. No re-registration, no second setup."
 
 **1:40 — 2:00 · Something the agent cannot see**
 
@@ -53,19 +56,17 @@ The agent reports it has no such capability. Show `POST /billing/charges` in the
 
 Scroll to `POST /billing/charges` in Swagger UI, **Try it out**, **Execute**. It works.
 
-"The document marks that endpoint `deny`. It is gone from the agent's capability set entirely — and still available to me, by hand, on the same page."
+"The document marks that endpoint `hidden`. It is gone from the agent's capability set entirely — and still available to me, by hand, on the same page."
 
-**2:00 — 2:30 · A multi-step plan under one approval**
+**2:00 — 2:30 · A multi-step plan, checked before anything runs**
 
 Ask: *"Create a project called Checkout reliability, then add tasks for the three most recent 500-error reports."*
 
-One consent card lists every step in order. Approve once. Watch the steps complete in the activity log.
-
-"Every step was checked before the first one ran. If one had been forbidden, none of them would have executed — no half-applied plan."
+The batch runs with no page prompt — the client gates the invocation, and every step was exposure-checked before the first one ran. Show what happens with a forbidden step mixed in: nothing executes at all, no half-applied plan.
 
 **2:30 — 2:45 · Switch environments by hand**
 
-Change the Swagger server dropdown from Sandbox to **Production**. The Agent Console's server line changes with it.
+Change the Swagger server dropdown from Sandbox to **Production**.
 
 Ask: *"List the active projects again."*
 
@@ -85,5 +86,6 @@ Ask for `GET /audit-events`, or run it in Swagger. Point at the `source` column:
 
 ## If there is spare time
 
-- Load the **no x-webmcp** document from the switcher: the whole tool set is re-derived, and the ledger falls back to the page's own permission mode.
+- Authorize the header key and create an export, then authorize the query key and poll its status: two schemes gating two halves of one flow.
+- Load the **no x-webmcp** document from the switcher: the whole tool set is re-derived, hidden operations reappear, and the held write becomes callable under the page default.
 - Append `?maxTools=5` to the URL: the document exceeds the cap, direct tools disappear, and the agent falls back to `openapi_search_operations` plus `openapi_execute_operation` without losing any capability.

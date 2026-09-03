@@ -24,12 +24,12 @@ Returns:
   "spec": { "title": "Waypoint Projects API", "version": "2.0.0", "openapiVersion": "3.1.0", "sourceUrl": "/openapi.yaml", "fingerprint": "1a2b3c" },
   "server": { "effectiveUrl": "/api/sandbox" },
   "auth": { "authorizedSchemes": [{ "name": "bearerAuth", "type": "http" }], "withCredentials": true },
-  "operations": { "total": 28, "supported": 27, "directToolsRegistered": 25, "directToolLimit": 64 },
-  "policy": { "pageMode": "ask-for-edits", "trustSpecAnnotations": true, "allow": 15, "confirm": 11, "blocked": 0, "hidden": 2 }
+  "operations": { "total": 28, "supported": 27, "directToolsRegistered": 24, "directToolLimit": 64 },
+  "policy": { "pageExposure": "write", "trustSpecAnnotations": true, "read": 12, "write": 13, "blocked": 1, "hidden": 2 }
 }
 ```
 
-Those numbers are the demo document under the demo page settings: 28 operations, one multipart upload that cannot be a direct tool, and two operations withheld by `x-webmcp.policy: deny`.
+Those numbers are the demo document under the demo page settings: 28 operations, one multipart upload that cannot be a direct tool, two operations hidden by `x-webmcp.tool: hidden`, and one write held at read.
 
 `authorizedSchemes` reports scheme names and types only. No credential value is ever included.
 
@@ -50,7 +50,7 @@ Those numbers are the demo document under the demo page settings: 28 operations,
 
 `limit` defaults to 20 and is capped at 30. Each result carries `key` (`METHOD /path`), `operationId`, `method`, `path`, `summary`, `tags`, `deprecated`, `directTool`, `supported`, `unsupportedReason`, and `agentPolicy`. The result also carries a `note` stating that summaries come from the OpenAPI document and are untrusted content.
 
-Operations withheld by `x-webmcp.policy: deny`, or by `operationFilter`, do not appear.
+Operations hidden by `x-webmcp.tool: hidden`, or by `operationFilter`, do not appear. Operations gated by `requiresAuth` DO appear — SEE vs CALL means an unauthorized agent lists them with `callable: false` and the schemes they need.
 
 ### `openapi_get_operation`
 
@@ -100,7 +100,7 @@ Failures return `{ "ok": false, "error": { "code": "...", "message": "..." } }`.
 
 ### `openapi_execute_batch`
 
-Runs several operations from the current document in order under a single human approval.
+Runs several operations from the current document in order — no prompts, no remembered grants. The full plan is visible in the input schema and the tool is registered with `destructiveHint: true`, so the WebMCP client gates the whole invocation as one unit.
 
 ```json
 {
@@ -128,10 +128,9 @@ Runs several operations from the current document in order under a single human 
 }
 ```
 
-`maxItems` follows `webMcp.maxBatchSteps` (default 10). Every step is resolved and policy-checked before anything executes:
+`maxItems` follows `webMcp.maxBatchSteps` (default 10). Every step is resolved and exposure-checked before anything executes:
 
-- If any step is unknown, ambiguous, unsupported, or blocked, the whole batch is refused and nothing runs.
-- If any step requires approval, the human sees one consent card listing all steps in order. "Always allow" is not offered for a batch.
+- If any step is unknown, ambiguous, unsupported, held, hidden, or unauthorized, the whole batch is refused and nothing runs.
 - Steps then run sequentially. `stopOnError` defaults to `true`. An aborted signal ends the batch and records an `ABORTED` step.
 
 Returns:
@@ -160,9 +159,9 @@ The safe name is derived from the `operationId`, or from method and path when th
 
 The input schema is the same `path` / `query` / `headers` / `body` grouping as the generic executor, restricted to the parameters the operation actually declares. Path parameters are required. Parameter names that look like credentials are excluded. JSON request bodies are preferred, then `+json`, then `application/x-www-form-urlencoded`, then `text/plain`.
 
-Tool descriptions are assembled from structural facts only — method, path, and the fact that the page's current server and authorization are used. OpenAPI prose never lands in a tool description. Annotations are `readOnlyHint` (true for GET/HEAD/OPTIONS), `destructiveHint` (from `x-webmcp.destructive`), and `untrustedContentHint`.
+Tool descriptions are assembled from structural facts only — method, path, and the fact that the page's current server and authorization are used. OpenAPI prose never lands in a tool description. Annotations are `readOnlyHint` (true for GET/HEAD/OPTIONS), `destructiveHint` (from `x-webmcp.destructive`), and `untrustedContentHint` (always true: spec and API content flow out through these tools).
 
-An operation is **not** registered as a direct tool when it is withheld, filtered out, unsupported, or its resolved decision is `block`. It can still be reached by `openapi_execute_operation` if its decision is `allow` or `confirm`.
+An operation is **not** registered as a direct tool when it is hidden, filtered out, unsupported, or its resolved level is `read` while the method is a write. It can still be inspected by `openapi_get_operation` when it is merely held (but not when hidden). Authorization-gated operations ARE registered: the gate is evaluated at call time, not at registration time.
 
 Documents with more operations than `maxDirectOperationTools` (default 64) register no direct tools at all. Discovery and generic execution still work.
 
@@ -172,21 +171,27 @@ Documents with more operations than `maxDirectOperationTools` (default 64) regis
 
 ```json
 {
-  "decision": "confirm",
+  "exposure": "write",
+  "readOnly": false,
   "destructive": true,
-  "requiresApproval": true,
+  "callable": true,
+  "requiresAuth": ["bearerAuth"],
+  "authorized": false,
   "declaredIn": "openapi-document"
 }
 ```
 
 | Field | Values | Meaning |
 |---|---|---|
-| `decision` | `allow` \| `confirm` \| `block` | What happens if the agent calls it. |
-| `destructive` | boolean | The publisher marked the operation irreversible. |
-| `requiresApproval` | boolean | True exactly when `decision` is `confirm`. |
-| `declaredIn` | `openapi-document` \| `page` | Which source produced the decision. `page` also covers the case where the decision was raised because the operation is destructive. |
+| `exposure` | `read` \| `write` \| `hidden` | The resolved level. Never `hidden` here — hidden operations are not reported at all. |
+| `readOnly` | boolean | True for GET/HEAD/OPTIONS. |
+| `destructive` | boolean | The publisher marked the operation irreversible. Surfaces as `destructiveHint`. |
+| `callable` | boolean | Whether a call would be attempted right now: false when held, or when `requiresAuth` is unsatisfied by live auth state. |
+| `requiresAuth` | `null` \| `"any"` \| `string[]` | The authorization gate, if any. A list means ANY of the schemes. |
+| `authorized` | boolean | Whether Swagger UI's live auth state currently satisfies the gate. |
+| `declaredIn` | `openapi-document` \| `page` | Which source produced the level. |
 
-The publisher's `reason` prose is deliberately **not** included. It is untrusted document text intended for a human, so it goes to the consent card and never into model-readable tool metadata. The agent learns *that* a person will be asked, not the argument for saying yes.
+There is deliberately no publisher prose in `agentPolicy` or any other model-readable surface. The agent learns *that* an operation needs authorization, not an argument about it.
 
 ## The `x-webmcp` extension
 
@@ -194,102 +199,53 @@ An `x-webmcp` object is valid on the OpenAPI document root, where it acts as a d
 
 ```yaml
 x-webmcp:
-  policy: ask-first          # no-prompt | ask-for-edits | ask-first | read-only | deny
-  destructive: true          # boolean
-  reason: Permanently removes a project and all of its tasks.
+  tool: read                # read | write | hidden
+  requiresAuth: bearerAuth  # true | scheme name | [names]
+  destructive: true         # boolean
 ```
 
 | Field | Type | Notes |
 |---|---|---|
-| `policy` | string enum | Any other value is dropped. |
-| `destructive` | boolean | Only the literal `true` is honoured. |
-| `reason` | string | Trimmed and truncated to 240 characters. Shown to a human only. |
+| `tool` | string enum | Any other value is dropped. The operation's value wins over the root's. |
+| `requiresAuth` | `true` \| string \| string[] | `true` needs any live authorization; names need ANY of those schemes authorized. The operation's value wins over the root's. Anything else is dropped. |
+| `destructive` | boolean | Only the literal `true` is honoured. OR-ed across operation, root, and resolver. |
 
-Parsing keeps only values this version understands. A non-object, an array, `policy: "allow-everything"`, `destructive: "yes"` — each is dropped, and an annotation left with no recognised fields is treated as absent. A malformed or hostile annotation degrades to "no annotation", never to a weaker policy.
+Parsing keeps only values this version understands. A non-object, an array, `tool: "sometimes"`, `requiresAuth: 42`, `destructive: "yes"` — each is dropped, and an annotation left with no recognised fields is treated as absent. A malformed or hostile annotation degrades to "no annotation", never to a weaker policy. There are no legacy aliases: the old `policy`/`agent` keys, `reason` prose, and the `allow`/`confirm`/`block` and permission-mode names are ignored entirely.
 
-`destructive` is the logical OR of the operation annotation and the document-root annotation.
+### How a level is reached
 
-### How a decision is reached
+The page's `webMcp.exposure` and the document's `x-webmcp.tool` (operation value, else root value) each name a level on the lattice `hidden < read < write`.
 
-Each permission mode reduces to a decision about one operation. Read-only means the method is GET, HEAD, or OPTIONS.
+1. If `trustSpecAnnotations` is `true` and the document names a level, it wins.
+2. Otherwise the **tighter** of the two wins. The document can only tighten.
+3. `hidden` from either source always wins, under either setting — a page `exposure: "hidden"` is an absolute kill switch.
+4. A page-supplied `policyResolver` composes tighten-only: its level replaces the result only when tighter, its `requiresAuth` only when tighter, its `destructive` is OR-ed in.
+5. A write operation held at `read` is visible but not callable (`blocked`); a read operation at `read` is unaffected.
 
-| Mode | Read operation | Write operation |
-|---|---|---|
-| `no-prompt` | `allow` | `allow` |
-| `ask-for-edits` | `allow` | `confirm` |
-| `ask-first` | `confirm` | `confirm` |
-| `read-only` | `allow` | `block` |
-| `deny` | `block` | `block` |
+The authorization gate is orthogonal to the level and is evaluated at CALL time against Swagger UI's live authorized schemes (`authSelectors.authorized()`), so authorizing flips the next call from `AUTH_REQUIRED` to success with no re-registration. Cookie sessions are invisible to the gate — Swagger only reports schemes it applies itself — so session-gated endpoints surface API 401s rather than `AUTH_REQUIRED`.
 
-The decisions form a lattice: `allow < confirm < block`.
+### Worked example
 
-1. Reduce the page's `permissionMode` to a page decision.
-2. Reduce the document annotation — the operation's `policy` if present, otherwise the root's — to a document decision. If neither declares a `policy`, there is no document decision.
-3. If `trustSpecAnnotations` is `false` (the default), take the **stricter** of the two. The document can only tighten. If it is `true`, the document decision replaces the page decision when one exists.
-4. If either source says `deny`, the decision becomes `block` and the operation is marked hidden — under either trust setting.
-5. If the operation is `destructive` and the decision is still `allow`, raise it to `confirm`.
+Page `exposure: "write"`, untrusted document (`trustSpecAnnotations: false`):
 
-Step 4 is why `deny` is safe to honour from an untrusted document: withholding a capability is never an escalation. It cuts both ways — a page `permissionMode: "deny"` is an absolute kill switch that withholds every operation, and no annotation can talk its way out of it even when `trustSpecAnnotations` is `true`.
+| Operation | `x-webmcp` | Level | Callable? |
+|---|---|---|---|
+| `GET /projects` | none | `write` (page) | yes, `readOnlyHint: true` |
+| `POST /projects` | none | `write` (page) | yes |
+| `POST /tasks/bulk` | `tool: read` | `read` (document, tighter) | no — visible, `READ_ONLY_MODE` |
+| `POST /billing/charges` | `tool: hidden` | `hidden` | absent everywhere |
+| `GET /reports/usage` | `tool: read, requiresAuth: bearerAuth` | `read` | only when bearerAuth is authorized, else `AUTH_REQUIRED` |
+| `DELETE /projects/{id}` | `tool: write, destructive: true` | `write` | yes, `destructiveHint: true` |
 
-### Truth table
+With page `exposure: "read"`, every write above becomes held regardless of annotations, and no annotation can loosen them.
 
-Cells give the resolved decision. `withheld` means blocked *and* removed from the capability set. Add `destructive: true` to any row and every `allow` becomes `confirm`.
+## Calls and the authorization gate
 
-**Default (`trustSpecAnnotations: false`) — the document may only tighten.**
+Direct tools, `openapi_execute_operation`, and `openapi_execute_batch` all pass through one authorization function, so there is exactly one place exposure is evaluated — at call time, against live state:
 
-Read operations (GET/HEAD/OPTIONS):
-
-| page mode \ `x-webmcp.policy` | none | `no-prompt` | `ask-for-edits` | `ask-first` | `read-only` | `deny` |
-|---|---|---|---|---|---|---|
-| `no-prompt` | allow | allow | allow | confirm | allow | withheld |
-| `ask-for-edits` | allow | allow | allow | confirm | allow | withheld |
-| `ask-first` | confirm | confirm | confirm | confirm | confirm | withheld |
-| `read-only` | allow | allow | allow | confirm | allow | withheld |
-| `deny` | withheld | withheld | withheld | withheld | withheld | withheld |
-
-Write operations (POST/PUT/PATCH/DELETE):
-
-| page mode \ `x-webmcp.policy` | none | `no-prompt` | `ask-for-edits` | `ask-first` | `read-only` | `deny` |
-|---|---|---|---|---|---|---|
-| `no-prompt` | allow | allow | confirm | confirm | block | withheld |
-| `ask-for-edits` | confirm | confirm | confirm | confirm | block | withheld |
-| `ask-first` | confirm | confirm | confirm | confirm | block | withheld |
-| `read-only` | block | block | block | block | block | withheld |
-| `deny` | withheld | withheld | withheld | withheld | withheld | withheld |
-
-Note the whole `no-prompt` row of the write table: an annotation can raise a silent page to `confirm` or `block`, and the `read-only` row shows that no annotation can lower a blocked write.
-
-**Trusted (`trustSpecAnnotations: true`) — the document is authoritative.**
-
-Read operations:
-
-| page mode \ `x-webmcp.policy` | none | `no-prompt` | `ask-for-edits` | `ask-first` | `read-only` | `deny` |
-|---|---|---|---|---|---|---|
-| `no-prompt` | allow | allow | allow | confirm | allow | withheld |
-| `ask-for-edits` | allow | allow | allow | confirm | allow | withheld |
-| `ask-first` | confirm | allow | allow | confirm | allow | withheld |
-| `read-only` | allow | allow | allow | confirm | allow | withheld |
-| `deny` | withheld | withheld | withheld | withheld | withheld | withheld |
-
-Write operations:
-
-| page mode \ `x-webmcp.policy` | none | `no-prompt` | `ask-for-edits` | `ask-first` | `read-only` | `deny` |
-|---|---|---|---|---|---|---|
-| `no-prompt` | allow | allow | confirm | confirm | block | withheld |
-| `ask-for-edits` | confirm | allow | confirm | confirm | block | withheld |
-| `ask-first` | confirm | allow | confirm | confirm | block | withheld |
-| `read-only` | block | allow | confirm | confirm | block | withheld |
-| `deny` | withheld | withheld | withheld | withheld | withheld | withheld |
-
-The `none` column is identical in both tables: with no annotation, the page decides.
-
-## Consent and the approval gate
-
-Direct tools, `openapi_execute_operation`, and `openapi_execute_batch` all pass through one authorization function, so there is exactly one place policy is evaluated and exactly one place a person is asked.
-
-- `block` returns an error without asking anyone: `OPERATION_DENIED` for a withheld operation, `READ_ONLY_MODE` for a write under a read-only policy, `POLICY_BLOCKED` otherwise.
-- `confirm` raises a consent card in the Agent Console and awaits the answer. **Deny** returns `PERMISSION_REQUIRED`. **Always allow** remembers the operation key for the rest of the page session and is not offered for destructive operations or batches.
-- `allow` proceeds, and the call is still recorded in the console's activity log with its outcome and duration.
+- Hidden or held returns an error without touching the API: `OPERATION_DENIED` for a hidden operation, `READ_ONLY_MODE` for a write held at read.
+- `requiresAuth` unsatisfied returns `AUTH_REQUIRED`, naming the needed schemes and pointing at Swagger UI's authorize dialog. Nothing executes.
+- Otherwise the call runs through Swagger UI's own execution path and the result is recorded with `displayedInSwaggerUi: true`, so it is visible where a person would look.
 
 ## Result handling
 
@@ -297,4 +253,4 @@ Responses are normalised before they reach the agent. At most 50 headers are kep
 
 ## Error codes
 
-`WEBMCP_UNAVAILABLE`, `SPEC_NOT_READY`, `SPEC_INVALID`, `OPERATION_NOT_FOUND`, `OPERATION_AMBIGUOUS`, `OPERATION_UNSUPPORTED`, `INPUT_INVALID`, `CONTENT_TYPE_UNSUPPORTED`, `AUTH_REQUIRED`, `NETWORK_ERROR`, `CORS_ERROR`, `ABORTED`, `RESPONSE_TOO_LARGE`, `SWAGGER_EXECUTION_ERROR`, `PERMISSION_REQUIRED`, `READ_ONLY_MODE`, `OPERATION_DENIED`, `POLICY_BLOCKED`, `BATCH_TOO_LARGE`, `INTERNAL_ERROR`.
+`WEBMCP_UNAVAILABLE`, `SPEC_NOT_READY`, `SPEC_INVALID`, `OPERATION_NOT_FOUND`, `OPERATION_AMBIGUOUS`, `OPERATION_UNSUPPORTED`, `INPUT_INVALID`, `CONTENT_TYPE_UNSUPPORTED`, `AUTH_REQUIRED`, `NETWORK_ERROR`, `CORS_ERROR`, `ABORTED`, `RESPONSE_TOO_LARGE`, `SWAGGER_EXECUTION_ERROR`, `READ_ONLY_MODE`, `OPERATION_DENIED`, `BATCH_TOO_LARGE`, `INTERNAL_ERROR`.

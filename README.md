@@ -10,7 +10,7 @@ No AI SDK. No MCP server. No copied bearer tokens.
 
 Run `npm install`, then `npm run dev` and open the local URL. Sign in, select Sandbox, and use normal Swagger Try it out. In a compatible browser agent, the same page exposes generated tools such as `api.listProjects.<hash>` and `api.createTask.<hash>`. Switch the Swagger server dropdown to Production; the next call uses Production without tool reconfiguration.
 
-The demo document (Waypoint Projects API, 28 operations) covers all HTTP methods, path/query/header parameters, repeated array query parameters, cursor pagination, optimistic concurrency with `If-Match` returning 409, an async 202 job with polling, a 207 multi-status bulk update, a multipart upload that is deliberately not exposed as a direct tool, and deliberate 401/404/422 paths. Sandbox and Production have separate data stores. The page can also load an unannotated copy of the same document, or any OpenAPI URL you paste, to show how the tool set is re-derived from whatever is loaded.
+The demo document (Waypoint Projects API, 28 operations) covers all HTTP methods, path/query/header parameters, repeated array query parameters, cursor pagination, optimistic concurrency with `If-Match` returning 409, an async 202 job with polling, a 207 multi-status bulk update, a multipart upload that is deliberately not exposed as a direct tool, hidden operations, a write held at read, three `requiresAuth` gates (HTTP bearer, header API key, query API key) over distinct operations, and deliberate 401/404/422 paths. Sandbox and Production have separate data stores. The page can also load an unannotated copy of the same document, or any OpenAPI URL you paste, to show how the tool set is re-derived from whatever is loaded.
 
 ## Why WebMCP?
 
@@ -35,7 +35,7 @@ SwaggerUI({
   dom_id: "#swagger-ui",
   url: "/openapi.yaml",
   plugins: [SwaggerUIWebMCP],
-  webMcp: { permissionMode: "ask-for-edits" }
+  webMcp: { exposure: "write" }
 });
 ```
 
@@ -48,97 +48,91 @@ All options live under the `webMcp` key of the Swagger UI config.
 | Option | Type | Default | Effect |
 |---|---|---|---|
 | `enabled` | boolean | `true` | `false` skips the plugin entirely; Swagger UI is untouched. |
-| `permissionMode` | `no-prompt` \| `ask-for-edits` \| `ask-first` \| `read-only` \| `deny` | `ask-for-edits` | The page-level policy applied to every operation. `deny` is an absolute kill switch that no annotation can override. |
+| `exposure` | `read` \| `write` \| `hidden` | `write` | The page-level default applied to every operation. `hidden` is an absolute kill switch that no annotation can override. |
 | `trustSpecAnnotations` | boolean | `false` | When `true`, `x-webmcp` in the document is authoritative instead of tighten-only. Set this only if you publish both the page and the document. |
 | `maxDirectOperationTools` | number | `64` | Documents with more operations than this register no direct tools; discovery and generic execution remain. |
 | `maxBatchSteps` | number | `10` | Maximum steps accepted by `openapi_execute_batch`. |
-| `showConsole` | boolean | `true` | `false` removes the in-page Agent Console. Operations that need approval then have no way to get it and fail closed. |
 | `operationFilter` | `(op) => boolean` | none | Returning `false` removes an operation from search, inspection, execution, and registration. |
+| `policyResolver` | `(op) => Policy \| undefined` | none | Page-supplied policy source consulted per operation. Composes with `x-webmcp` and may only tighten. |
 
 These settings are read live rather than captured at load time, so changing `webMcp` on the Swagger config after startup takes effect on the next call.
 
 ## Agent policy: the `x-webmcp` extension
 
-The page owner sets a baseline with `permissionMode`. The team that publishes the API can state per-endpoint policy in the OpenAPI document itself, with an `x-webmcp` object on the document root (as a default) or on any operation.
+The page owner sets a baseline with `exposure`. The team that publishes the API declares per-endpoint agent policy in the OpenAPI document itself, with an `x-webmcp` object on the document root (as a default) or on any operation.
 
 ```yaml
 openapi: 3.1.0
 
 x-webmcp:
-  policy: ask-for-edits          # document-wide default
+  tool: write                     # document-wide default
 
 paths:
   /projects/{projectId}/tasks:
-    post:
-      operationId: createTask
+    get:
+      operationId: listTasks
       x-webmcp:
-        policy: no-prompt
-        reason: Creating a task is cheap and reversible.
+        tool: read
   /projects/{projectId}:
     delete:
       operationId: deleteProject
       x-webmcp:
-        policy: ask-first
+        tool: write
         destructive: true
-        reason: Permanently removes a project and all of its tasks.
+  /reports/usage:
+    get:
+      operationId: getUsageReport
+      security:
+        - bearerAuth: []
+      x-webmcp:
+        tool: read
+        requiresAuth: bearerAuth
   /billing/charges:
     post:
       operationId: createCharge
       x-webmcp:
-        policy: deny
-        reason: Payments are out of scope for agents on this documentation page.
+        tool: hidden
 ```
 
-- `policy` — one of `no-prompt`, `ask-for-edits`, `ask-first`, `read-only`, `deny`.
-- `destructive` — boolean. Forces at least a human confirmation, and withholds the "always allow" button.
-- `reason` — publisher prose shown to a human in the consent card. It never enters model-readable tool metadata.
+- `tool` — one of `read`, `write`, `hidden`. What the operation is for agents: a READ tool, a WRITE tool, or HIDDEN (never registered, never searchable).
+- `requiresAuth` — `true`, a security scheme name, or a list of scheme names. The operation stays SEE-able but is not CALL-able until Swagger UI's live auth state satisfies the gate; a call before that returns a structured `AUTH_REQUIRED` error. The human authorizes through Swagger UI's normal authorize dialog and the same call then succeeds.
+- `destructive` — boolean. Surfaces as `destructiveHint` on the registered tool so the WebMCP client can gate the invocation. It never prompts anyone by itself.
+
+There are no consent keys and no legacy aliases. `allow`, `confirm`, `block`, `policy`, `agent`, `reason`, and the old permission-mode names are not read.
 
 ### The security property
 
-Every mode reduces to a decision on the lattice `allow < confirm < block`. An OpenAPI document is untrusted input, so **by default a document annotation may only tighten the page's decision, never loosen it**: the page decision and the document decision are compared and the stricter one wins. A `read-only` page cannot be talked into writes by a document that claims `no-prompt`.
+Both sources reduce to a level on the lattice `hidden < read < write`. An OpenAPI document is untrusted input, so **by default a document annotation may only tighten the page's level, never loosen it**: the page level and the document level are compared and the tighter one wins. A `read` page cannot be talked into writes by a document that claims `write`.
 
-A publisher who authors both the page and the document can set `trustSpecAnnotations: true` to make the document authoritative in both directions. Two rules survive that setting:
-
-- `policy: deny` always removes the operation from the capability set. Refusing exposure is never an escalation.
-- `destructive: true` always forces at least `confirm`, even on a trusted `no-prompt` document.
+A publisher who authors both the page and the document can set `trustSpecAnnotations: true` to make the document authoritative in both directions. One rule survives that setting: `tool: hidden` always removes the operation from the capability set. Refusing exposure is never an escalation.
 
 Unrecognised or malformed annotation values are dropped rather than guessed at, so a hostile annotation degrades to "no annotation" rather than to a weaker policy.
 
-### Withheld is not the same as blocked
+### SEE vs CALL
 
-- **Withheld** (`policy: deny`): the operation is absent from `openapi_search_operations`, `openapi_get_operation`, execution, and direct-tool registration. The agent has no evidence it exists. A human can still call it in Swagger UI.
-- **Blocked** (for example a write under `read-only`): the operation is still discoverable, and its `agentPolicy` says `decision: "block"`, so the agent can explain why it cannot proceed. It is not callable and gets no direct tool.
-
-## The Agent Console
-
-An in-page panel, bottom-right, rendered in a shadow root so Swagger UI's stylesheet cannot reach it. It shows:
-
-- the selected server, the page mode, and whether spec policy is authoritative or may only tighten
-- a ledger of the capability set: N direct, N ask first, N blocked, N withheld
-- a live activity log of every agent call, with the decision that let it run, its outcome, and its duration
-- consent cards for anything that requires approval
-
-A consent card names the operation as `METHOD /path`, lists the argument groups, shows the publisher's `reason` under the label "Stated by the API document" (rendered as text, never HTML, because it is untrusted), offers the full argument JSON in an expandable block, and ends with **Allow once**, **Always allow**, and **Deny**. "Always allow" remembers the operation for the rest of the page session, and is withheld for destructive operations.
-
-This replaces `window.confirm`, which blocks the event loop and would stall the agent's own tool call, shows no arguments, and cannot offer a remembered grant.
+- **Hidden** (`tool: hidden`): the operation is absent from `openapi_search_operations`, `openapi_get_operation`, execution, and direct-tool registration. The agent has no evidence it exists. A human can still call it in Swagger UI.
+- **Held** (a write under a `read` level): the operation is still discoverable, and its `agentPolicy` says it is not callable, so the agent can explain why it cannot proceed. It gets no direct tool.
+- **Gated** (`requiresAuth` unsatisfied): the operation is registered, listed, and correctly annotated — the agent sees it and which schemes it needs — but calling it returns `AUTH_REQUIRED`. Authorizing in Swagger UI flips the next call to success with no re-registration.
+- **Consent and client-side locking are the client's job.** The page never prompts, never remembers grants, and never hides or disables tools in the agent's own state. Its interface to the client is registration visibility plus MCP annotations (`readOnlyHint`, `destructiveHint`, `untrustedContentHint`) plus structured errors.
 
 ## Tools
 
-Five stable core tools are always present: `openapi_get_context`, `openapi_search_operations`, `openapi_get_operation`, `openapi_execute_operation`, and `openapi_execute_batch`. Supported, non-blocked operations additionally get a direct `api.<safe-name>.<generation-hash>` tool.
+Five stable core tools are always present: `openapi_get_context`, `openapi_search_operations`, `openapi_get_operation`, `openapi_execute_operation`, and `openapi_execute_batch`. Supported, callable operations additionally get a direct `api.<safe-name>.<generation-hash>` tool.
 
-`openapi_execute_batch` runs up to `maxBatchSteps` operations from the current document in order under a single human approval. Every step is resolved and policy-checked before any step runs, so a batch never half-applies a plan the user would have refused; if one step is forbidden, nothing executes. `stopOnError` defaults to `true`.
+`openapi_execute_batch` runs up to `maxBatchSteps` operations from the current document in order. Every step is resolved and exposure-checked before any step runs, so a batch never half-applies a plan containing a step the agent may not call; if one step is hidden, held, unknown, or unauthorized, nothing executes. `stopOnError` defaults to `true`. The tool itself is registered with `destructiveHint: true` and its full plan is visible in the input schema, so the WebMCP client gates the invocation as one unit.
 
-See [docs/webmcp-tools.md](docs/webmcp-tools.md) for input shapes, the `agentPolicy` result field, and the full policy truth table.
+See [docs/webmcp-tools.md](docs/webmcp-tools.md) for input shapes, the `agentPolicy` result field, and the `x-webmcp` reference.
 
 ## Security and limitations
 
 - OpenAPI prose and API responses are untrusted content and are never copied into privileged generated metadata. Tool descriptions are assembled from structural facts only.
-- The publisher's `reason` goes to the human in the consent card and is deliberately excluded from `agentPolicy` and every other model-readable surface.
 - Auth values stay inside Swagger/browser execution. They never enter tool inputs or results; sensitive parameter and header names are excluded and response headers are redacted.
+- The page never prompts. Permission UX belongs to the WebMCP client, driven by registration visibility and tool annotations.
 - Tools cannot select arbitrary URLs. Every call resolves against the currently selected Swagger server. Normal CORS and browser permissions still apply.
 - Response bodies are bounded to about 50 KB and binary content types are reported by type and size rather than inlined. `AbortSignal` is honoured.
 - Write methods are not marked read-only. Binary and multipart request bodies are not exposed as direct tools in v1.
 - Documents larger than `maxDirectOperationTools` fall back to discovery plus generic execution, so the agent's capability set stays legible.
+- Cookie-based sessions are invisible to `requiresAuth`: Swagger's live auth state only reflects schemes it applies itself (HTTP, API keys), so session-gated endpoints surface API 401s rather than `AUTH_REQUIRED`.
 - There is no production WebMCP polyfill. Tests drive a test-only `modelContext` shim.
 - Persistent, headless integrations should use a conventional MCP server.
 

@@ -2,6 +2,11 @@
 
 Deviations from [BUILD_CONTRACT.md](BUILD_CONTRACT.md), with the reasoning that produced them. Everything else in the contract is implemented as written: Swagger UI 5.32.x, Apache-2.0, versioned `api.<safe-name>.<hash>` direct tools, untrusted OpenAPI prose kept out of privileged metadata, no secrets in tool inputs or outputs, live server/auth/interceptor/credential reads at execution time, a 64-tool default cap, safe degradation for binary bodies, bounded and redacted results, `AbortSignal` support, no production polyfill, and a test-only `modelContext` shim.
 
+> Historical note: entries 1–3 below describe the original consent-based
+> interaction model (permission lattice, in-page Agent Console, single-approval
+> batch). That model was replaced — see entries 5–7 for what superseded it and
+> why. Entry 4 (one demo backend) still stands.
+
 ## 1. A fifth core tool: `openapi_execute_batch`
 
 **Contract:** four core tools — `openapi_get_context`, `openapi_search_operations`, `openapi_get_operation`, `openapi_execute_operation`.
@@ -41,3 +46,36 @@ The console fixes all three: it is asynchronous, it shows the argument groups an
 **Why:** the demo previously had three separate implementations of the same fake API, which had already diverged. A demo whose local behaviour differs from its deployed behaviour is worse than no demo, because the failure surfaces during the recording. One router, two thin transports, and separate per-environment stores means `npm run dev` and the deployed URL cannot drift.
 
 The consolidated backend also made it practical to grow the demo document to 28 operations covering the cases that actually exercise the plugin: every HTTP method, path/query/header parameters, repeated array query parameters, enums, cursor pagination, `If-Match` optimistic concurrency returning 409, an async 202 job with polling, a 207 multi-status bulk update, a multipart upload that is deliberately unsupported as a direct tool, and deliberate 401/404/422 paths. The audit log records whether each write came from Swagger UI or from the agent.
+
+## 5. Permission UX belongs to the WebMCP client — the consent system was removed
+
+**Was:** entries 1–3 — a permission lattice (`allow < confirm < block`), an in-page Agent Console with consent cards, allow-once/allow-always session memory, and single-approval batch.
+
+**Now:** none of that exists. No consent UI, no consent flow in the gate, no remembered grants, no `showConsole` or `permissionMode` options.
+
+**Why:** permission UX is the WebMCP client's job (the agent host), not the page's. A page inventing its own prompts duplicates — and can contradict — the client's gating: the client already decides what to ask a person based on tool annotations. Two prompters means two policies, and the page's is the one with less context. Client-side endpoint locking (hiding or disabling tools in the agent's own state) is likewise the client's UI, not ours.
+
+Our interface to the client is three things, and only those three: **registration visibility** (hidden operations are never registered or searchable), **MCP annotations** (`readOnlyHint` on reads, absent on writes, `destructiveHint` where the publisher marked an irreversible operation, `untrustedContentHint` wherever spec/API content flows out), and **structured errors** (`OPERATION_DENIED`, `READ_ONLY_MODE`, `AUTH_REQUIRED`). Agent calls remain visible through Swagger UI's own panels (`displayedInSwaggerUi`) — that shared-state visibility is the demo story, not a parallel console.
+
+## 6. One clean policy vocabulary: `tool` / `requiresAuth` / `destructive`
+
+**Was:** `x-webmcp: { policy: no-prompt | ask-for-edits | ask-first | read-only | deny, destructive, reason }` plus a page `permissionMode` — a vocabulary about *prompting*.
+
+**Now:** `x-webmcp: { tool: "read" | "write" | "hidden", requiresAuth: true | <scheme> | [<schemes>], destructive: bool }` plus a page `exposure: "read" | "write" | "hidden"` — a vocabulary about *what the operation is for agents*.
+
+**Why each piece:**
+
+- `tool` declares the publisher's authorization policy per operation: a READ tool, a WRITE tool, or HIDDEN. The page default composes tighten-only on the lattice `hidden < read < write` (or the document is authoritative under `trustSpecAnnotations`), exactly as before — the rule survived, the prompting semantics did not.
+- `requiresAuth` declares the policy *per client auth state*: the operation is listed and registered while unauthorized (SEE) but not callable (CALL returns `AUTH_REQUIRED`). The gate is evaluated at call time against Swagger UI's live authorized schemes, so a human authorizing through the normal dialog flips agent behavior instantly with no re-registration. Several names mean ANY of them, mirroring OpenAPI `security` alternatives. `true` means any live authorization.
+- `destructive` survived but changed meaning: it no longer forces a prompt (there is nothing to prompt with) — it becomes `destructiveHint` so the *client* can gate.
+- `reason` (publisher prose for consent cards) is gone with the cards. Prompt-injection hygiene stays: no prose in schemas, enforced by tests.
+
+**Why no legacy aliases:** the old keys named consent behavior (`allow`, `confirm`, `ask-first`, `deny`, `permissionMode`). Keeping them as aliases would keep two mental models alive and let a copied old annotation silently mean something the author did not intend under the new model. A clean break — unknown keys are ignored — forces annotations to say what they mean now. The old vocabulary's one honest direction (withholding capability) is preserved as `tool: hidden`.
+
+**Session cookies are out of scope for `requiresAuth`, deliberately.** Swagger UI's live auth state only reflects schemes it applies itself (HTTP, API keys). A cookie session set by a server login is invisible to `authSelectors.authorized()`, so gating on it would fail closed forever. Session-gated endpoints therefore surface API 401s rather than `AUTH_REQUIRED` — the demo keeps its cookie flow for the bulk of operations and uses machine-authorizable schemes (bearer, header key, query key) for the three gated ones.
+
+## 7. The batch tool stays — re-justified without approvals
+
+**Was:** entry 1 justified `openapi_execute_batch` as "one approval for a multi-step plan".
+
+**Now:** there are no approvals, but the tool stays. The honest justification is narrower: the client gates the batch *invocation itself* — the tool is registered with `destructiveHint: true` and the full plan is visible in the input schema — and every step is resolved and exposure-checked before anything runs, so a batch never half-applies a plan containing a step the agent may not call. If keeping multi-effect invocations behind one client-side gate is judged to smuggle effects past client gating, the correct move is to remove the tool; as specified here the plan-visibility plus destructive hint is exactly what the client needs to gate it faithfully, so it stays. Had that not held, it would have been deleted rather than kept as cruft.
