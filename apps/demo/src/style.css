@@ -1,0 +1,271 @@
+:root {
+  --ink: #152238;
+  --navy: #10233f;
+  --line: #dce5f0;
+  --muted: #718198;
+  --accent: #64a9ff;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--ink);
+  background: #f6f8fb;
+}
+
+body {
+  margin: 0;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Hero ---------------------------------------------------------------- */
+
+.hero {
+  background: linear-gradient(180deg, #10233f 0%, #143054 100%);
+  color: #fff;
+  padding: 38px max(24px, calc((100% - 1180px) / 2)) 34px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 24px;
+}
+
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #8fc5ff;
+  margin: 0 0 10px;
+  font-weight: 700;
+}
+
+.hero h1 {
+  font-size: 34px;
+  line-height: 1.15;
+  margin: 0 0 8px;
+  letter-spacing: -0.01em;
+}
+
+.tagline {
+  margin: 0;
+  color: #c8d9ee;
+  font-size: 15px;
+}
+
+.session {
+  font-size: 14px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.session button,
+.hero button {
+  border: 0;
+  background: var(--accent);
+  color: #08172d;
+  border-radius: 6px;
+  padding: 8px 13px;
+  font: inherit;
+  font-weight: 700;
+  margin-left: 8px;
+  cursor: pointer;
+}
+
+.session button:hover {
+  background: #82bbff;
+}
+
+/* Status strip and document switcher ---------------------------------- */
+
+.strip {
+  max-width: 1180px;
+  margin: 18px auto 0;
+  padding: 0 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.notice {
+  padding: 12px 16px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 14px;
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+
+.notice #statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #45b97c;
+  flex: none;
+}
+
+.hint {
+  color: var(--muted);
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.switcher {
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.switcher-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.switcher-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 9px;
+}
+
+.chip {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: #f8fafc;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.chip small {
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: 5px;
+}
+
+.chip:hover {
+  border-color: #b6c6d8;
+}
+
+.chip.is-active {
+  background: var(--navy);
+  border-color: var(--navy);
+  color: #fff;
+}
+
+.chip.is-active small {
+  color: #9dc4f2;
+}
+
+.spec-form {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.spec-form input {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-width: 260px;
+}
+
+.spec-form button {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 13px;
+  border-radius: 6px;
+  border: 1px solid var(--navy);
+  background: var(--navy);
+  color: #fff;
+  cursor: pointer;
+}
+
+.switcher-note {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* Install snippet ------------------------------------------------------ */
+
+.install {
+  max-width: 1180px;
+  margin: 14px auto 0;
+  padding: 18px 20px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.install h2 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.install pre {
+  margin: 0;
+  padding: 14px 16px;
+  background: var(--navy);
+  color: #dbe7f5;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.install .hl {
+  color: #ffd479;
+}
+
+.install p {
+  margin: 12px 0 0;
+  font-size: 13.5px;
+  color: #4a5b70;
+  max-width: 72ch;
+}
+
+/* Swagger UI sits inside the same page width ---------------------------- */
+
+#swagger-ui {
+  margin-top: 6px;
+}
+
+@media (max-width: 760px) {
+  .hero {
+    display: block;
+  }
+
+  .session {
+    text-align: left;
+    margin-top: 18px;
+  }
+
+  .hint {
+    display: none;
+  }
+
+  .spec-form {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .spec-form input {
+    min-width: 0;
+    flex: 1;
+  }
+}

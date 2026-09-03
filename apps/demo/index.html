@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Waypoint Projects API · Swagger UI WebMCP</title>
+    <meta
+      name="description"
+      content="A normal Swagger UI documentation page that a browser agent can drive, using the environment and session the developer already has open."
+    />
+  </head>
+  <body>
+    <main>
+      <header class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Waypoint developer docs</p>
+          <h1>Waypoint Projects API</h1>
+          <p class="tagline">If you can Try it out, your agent can too.</p>
+        </div>
+        <div class="hero-side">
+          <div id="session" class="session">Demo session: signed out <button id="login">Sign in</button></div>
+        </div>
+      </header>
+
+      <section class="strip" aria-label="Live session state">
+        <div class="notice">
+          <span id="statusDot" aria-hidden="true"></span>
+          <span id="status">Swagger UI loading</span>
+          <span class="hint">A normal Swagger session, enhanced when this browser supports WebMCP.</span>
+        </div>
+
+        <div class="switcher">
+          <span class="switcher-label">Loaded document</span>
+          <div class="switcher-actions">
+            <button type="button" data-spec="/openapi.yaml" class="chip is-active">
+              Waypoint <small>annotated</small>
+            </button>
+            <button type="button" data-spec="/openapi-unannotated.yaml" class="chip">
+              Waypoint <small>no x-webmcp</small>
+            </button>
+            <form id="specForm" class="spec-form">
+              <label class="sr-only" for="specUrl">OpenAPI document URL</label>
+              <input id="specUrl" name="specUrl" type="url" placeholder="…or paste any OpenAPI URL" />
+              <button type="submit">Load</button>
+            </form>
+          </div>
+          <p class="switcher-note">
+            Swapping the document re-derives the agent's whole tool set. Nothing about the plugin changes.
+          </p>
+        </div>
+      </section>
+
+      <section class="install" aria-label="How to install">
+        <h2>Three lines in your existing Swagger UI</h2>
+<pre><code>import SwaggerUIWebMCP from "swagger-ui-webmcp";
+
+SwaggerUI({
+  dom_id: "#swagger-ui",
+  url: "/openapi.yaml",
+  plugins: [SwaggerUIWebMCP],          <span class="hl">// ← the whole integration</span>
+  webMcp: { permissionMode: "ask-for-edits" }
+});</code></pre>
+        <p>
+          No AI SDK. No MCP server to install. No bearer token leaves the page. The agent inherits whichever
+          server you picked in the dropdown below and whatever session you are already signed into.
+        </p>
+      </section>
+
+      <div id="swagger-ui"></div>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

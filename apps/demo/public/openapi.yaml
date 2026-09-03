@@ -1,0 +1,852 @@
+openapi: 3.1.0
+
+info:
+  title: Waypoint Projects API
+  version: 2.0.0
+  summary: A fictional project-tracking API used to demonstrate a live agent-capable documentation session.
+  description: |
+    Every operation here is reachable by a human through normal Swagger UI "Try it out".
+    Operations additionally carry `x-webmcp` annotations describing how a browser agent
+    may use them. Those annotations are part of the OpenAPI document, so the team that
+    publishes the API decides the agent policy — not the page, and not the agent.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+
+servers:
+  - url: /api/sandbox
+    description: Sandbox
+  - url: /api/production
+    description: Production
+
+# Document-level default. Individual operations may tighten this (and, when the
+# publisher sets `webMcp.trustSpecAnnotations`, may also relax it).
+x-webmcp:
+  policy: ask-for-edits
+
+tags:
+  - name: Account
+  - name: Projects
+  - name: Tasks
+  - name: Comments
+  - name: Audit
+  - name: Reports
+  - name: Exports
+  - name: Webhooks
+  - name: Billing
+  - name: Admin
+  - name: System
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      tags: [System]
+      summary: Service health
+      security: []
+      x-webmcp:
+        policy: no-prompt
+      responses:
+        '200':
+          description: Service is reachable.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string}
+                  service: {type: string}
+                  time: {type: string, format: date-time}
+
+  /me:
+    get:
+      operationId: getMe
+      tags: [Account]
+      summary: Get the signed-in developer
+      responses:
+        '200':
+          description: The current user for the selected environment.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/User'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+  /projects:
+    get:
+      operationId: listProjects
+      tags: [Projects]
+      summary: List projects
+      description: Supports filtering, free-text search, repeated tag filters, sorting and cursor pagination.
+      parameters:
+        - name: status
+          in: query
+          schema: {type: string, enum: [active, paused, archived]}
+        - name: q
+          in: query
+          description: Free-text match against name, key and description.
+          schema: {type: string, maxLength: 120}
+        - name: tag
+          in: query
+          description: Repeatable. Matches projects carrying any of the given tags.
+          explode: true
+          schema:
+            type: array
+            items: {type: string}
+            maxItems: 10
+        - name: sort
+          in: query
+          schema: {type: string, enum: [updatedAt, createdAt, name], default: updatedAt}
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: A page of projects.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  projects:
+                    type: array
+                    items: {$ref: '#/components/schemas/Project'}
+                  pagination: {$ref: '#/components/schemas/Pagination'}
+                  environment: {type: string}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+    post:
+      operationId: createProject
+      tags: [Projects]
+      summary: Create a project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/NewProject'}
+      responses:
+        '201':
+          description: The created project.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Project'}
+        '422': {$ref: '#/components/responses/ValidationFailed'}
+
+  /projects/{projectId}:
+    parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+    get:
+      operationId: getProject
+      tags: [Projects]
+      summary: Get a project
+      responses:
+        '200':
+          description: The project.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Project'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+    patch:
+      operationId: updateProject
+      tags: [Projects]
+      summary: Update a project
+      description: Send `If-Match` with the project's current version for optimistic concurrency control.
+      parameters:
+        - name: If-Match
+          in: header
+          description: The version the caller believes is current. A stale value returns 409.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProjectPatch'}
+      responses:
+        '200':
+          description: The updated project.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Project'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/ValidationFailed'}
+
+    delete:
+      operationId: deleteProject
+      tags: [Projects]
+      summary: Delete an archived project
+      x-webmcp:
+        policy: ask-first
+        destructive: true
+        reason: Permanently removes a project and all of its tasks.
+      responses:
+        '204': {description: Deleted.}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /projects/{projectId}/archive:
+    parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+    post:
+      operationId: archiveProject
+      tags: [Projects]
+      summary: Archive a project
+      responses:
+        '200':
+          description: The archived project.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Project'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /projects/{projectId}/attachments:
+    parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+    post:
+      operationId: uploadProjectAttachment
+      tags: [Projects]
+      summary: Upload an attachment
+      description: Binary upload. Usable from Swagger UI; not exposed as a direct WebMCP tool in v1.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: {type: string, format: binary}
+                caption: {type: string}
+      responses:
+        '201': {description: The stored attachment.}
+
+  /projects/{projectId}/tasks:
+    parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+    get:
+      operationId: listTasks
+      tags: [Tasks]
+      summary: List tasks in a project
+      parameters:
+        - name: status
+          in: query
+          schema: {type: string, enum: [open, in_progress, blocked, done]}
+        - name: assignee
+          in: query
+          schema: {type: string, format: email}
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: A page of tasks.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks:
+                    type: array
+                    items: {$ref: '#/components/schemas/Task'}
+                  pagination: {$ref: '#/components/schemas/Pagination'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+    post:
+      operationId: createTask
+      tags: [Tasks]
+      summary: Create a task
+      x-webmcp:
+        policy: no-prompt
+        reason: Creating a task is cheap and reversible, so agents may do it without a prompt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/NewTask'}
+      responses:
+        '201':
+          description: The created task.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Task'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/ValidationFailed'}
+
+  /projects/{projectId}/tasks/{taskId}:
+    parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+      - {$ref: '#/components/parameters/TaskId'}
+    get:
+      operationId: getTask
+      tags: [Tasks]
+      summary: Get a task
+      responses:
+        '200':
+          description: The task.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Task'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+    patch:
+      operationId: updateTask
+      tags: [Tasks]
+      summary: Update a task
+      x-webmcp:
+        policy: no-prompt
+        reason: Task field edits are routine and fully visible in the audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TaskPatch'}
+      responses:
+        '200':
+          description: The updated task.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Task'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/ValidationFailed'}
+
+    delete:
+      operationId: deleteTask
+      tags: [Tasks]
+      summary: Delete a task
+      x-webmcp:
+        destructive: true
+        reason: Deletes the task and its comments.
+      responses:
+        '204': {description: Deleted.}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /tasks:
+    get:
+      operationId: searchTasks
+      tags: [Tasks]
+      summary: Search tasks across projects
+      parameters:
+        - name: q
+          in: query
+          schema: {type: string, maxLength: 120}
+        - name: status
+          in: query
+          schema: {type: string, enum: [open, in_progress, blocked, done]}
+        - name: priority
+          in: query
+          schema: {type: string, enum: [low, medium, high, urgent]}
+        - name: label
+          in: query
+          description: Repeatable label filter.
+          explode: true
+          schema:
+            type: array
+            items: {type: string}
+        - name: X-Request-Id
+          in: header
+          description: Echoed back to correlate a client request with server logs.
+          schema: {type: string, maxLength: 64}
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: Matching tasks.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks:
+                    type: array
+                    items: {$ref: '#/components/schemas/Task'}
+                  pagination: {$ref: '#/components/schemas/Pagination'}
+                  requestId: {type: [string, 'null']}
+
+  /tasks/bulk:
+    post:
+      operationId: bulkUpdateTasks
+      tags: [Tasks]
+      summary: Update many tasks at once
+      description: Applies up to 25 partial task updates and reports per-item success.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [operations]
+              additionalProperties: false
+              properties:
+                operations:
+                  type: array
+                  minItems: 1
+                  maxItems: 25
+                  items:
+                    type: object
+                    required: [taskId]
+                    additionalProperties: false
+                    properties:
+                      taskId: {type: string}
+                      status: {type: string, enum: [open, in_progress, blocked, done]}
+                      priority: {type: string, enum: [low, medium, high, urgent]}
+                      assignee: {type: string, format: email}
+      responses:
+        '207':
+          description: Per-item results.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  applied: {type: integer}
+                  failed: {type: integer}
+                  results: {type: array, items: {type: object}}
+        '422': {$ref: '#/components/responses/ValidationFailed'}
+
+  /tasks/{taskId}/comments:
+    parameters:
+      - {$ref: '#/components/parameters/TaskId'}
+    get:
+      operationId: listComments
+      tags: [Comments]
+      summary: List comments on a task
+      responses:
+        '200':
+          description: Comments on the task.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  comments:
+                    type: array
+                    items: {$ref: '#/components/schemas/Comment'}
+                  total: {type: integer}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+    post:
+      operationId: createComment
+      tags: [Comments]
+      summary: Comment on a task
+      x-webmcp:
+        policy: no-prompt
+        reason: Comments are additive and attributed, so agents may post them directly.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              additionalProperties: false
+              properties:
+                body: {type: string, minLength: 1, maxLength: 4000}
+      responses:
+        '201':
+          description: The created comment.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Comment'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /audit-events:
+    get:
+      operationId: listAuditEvents
+      tags: [Audit]
+      summary: List audit events
+      description: Newest first. Every write in this demo appears here, tagged with its source.
+      parameters:
+        - name: action
+          in: query
+          schema: {type: string}
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: A page of audit events.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items: {$ref: '#/components/schemas/AuditEvent'}
+                  pagination: {$ref: '#/components/schemas/Pagination'}
+
+  /reports/usage:
+    get:
+      operationId: getUsageReport
+      tags: [Reports]
+      summary: Usage report
+      parameters:
+        - name: days
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 90, default: 14}
+      responses:
+        '200':
+          description: A usage time series with totals.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  environment: {type: string}
+                  window: {type: object}
+                  totals: {type: object}
+                  series: {type: array, items: {type: object}}
+
+  /exports:
+    post:
+      operationId: createExport
+      tags: [Exports]
+      summary: Start an export job
+      description: Returns 202 with a job id. Poll `getExport` until the status is `complete`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                format: {type: string, enum: [csv, json, ndjson], default: json}
+                scope: {type: string, enum: [projects, tasks, audit], default: projects}
+      responses:
+        '202':
+          description: The queued job.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ExportJob'}
+
+  /exports/{jobId}:
+    parameters:
+      - name: jobId
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      operationId: getExport
+      tags: [Exports]
+      summary: Get export job status
+      responses:
+        '200':
+          description: Current job state.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ExportJob'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /webhooks:
+    get:
+      operationId: listWebhooks
+      tags: [Webhooks]
+      summary: List webhooks
+      responses:
+        '200':
+          description: Configured webhooks.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhooks:
+                    type: array
+                    items: {$ref: '#/components/schemas/Webhook'}
+                  total: {type: integer}
+
+    post:
+      operationId: createWebhook
+      tags: [Webhooks]
+      summary: Register a webhook
+      x-webmcp:
+        policy: ask-first
+        reason: Sends future API events to an external URL, so a human confirms the destination.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              additionalProperties: false
+              properties:
+                url: {type: string, format: uri, pattern: '^https://'}
+                events:
+                  type: array
+                  items: {type: string, enum: [task.created, task.status_changed, project.updated]}
+                active: {type: boolean, default: true}
+                secret:
+                  type: string
+                  description: Signing secret. Never returned by the API.
+                  writeOnly: true
+      responses:
+        '201':
+          description: The registered webhook.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Webhook'}
+        '422': {$ref: '#/components/responses/ValidationFailed'}
+
+  /webhooks/{webhookId}:
+    parameters:
+      - name: webhookId
+        in: path
+        required: true
+        schema: {type: string}
+    delete:
+      operationId: deleteWebhook
+      tags: [Webhooks]
+      summary: Delete a webhook
+      x-webmcp:
+        destructive: true
+        reason: Stops event delivery to an external system.
+      responses:
+        '204': {description: Deleted.}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /billing/charges:
+    post:
+      operationId: createCharge
+      tags: [Billing]
+      summary: Create a charge
+      description: Moves money. Fully usable by a signed-in human in Swagger UI.
+      x-webmcp:
+        policy: deny
+        reason: Payments are out of scope for agents on this documentation page.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amountCents]
+              additionalProperties: false
+              properties:
+                amountCents: {type: integer, minimum: 1}
+                currency: {type: string, enum: [usd, eur], default: usd}
+                description: {type: string}
+      responses:
+        '201': {description: The created charge.}
+        '422': {$ref: '#/components/responses/ValidationFailed'}
+
+  /admin/api-keys:
+    get:
+      operationId: listApiKeys
+      tags: [Admin]
+      summary: List API keys
+      description: Returns key metadata only. Never returns key material.
+      x-webmcp:
+        policy: deny
+        reason: Credential metadata is never exposed to the agent capability set.
+      responses:
+        '200': {description: API key metadata.}
+
+  /admin/reset-demo:
+    post:
+      operationId: resetDemo
+      tags: [Admin]
+      summary: Reset demo data
+      x-webmcp:
+        policy: ask-first
+        destructive: true
+        reason: Discards every change made in the selected environment.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                environment: {type: string, enum: [sandbox, production]}
+      responses:
+        '200': {description: The environment was reseeded.}
+
+components:
+  parameters:
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      description: Project id or short key.
+      schema: {type: string, maxLength: 64}
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema: {type: string, maxLength: 64}
+    Limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor from a previous response's `pagination.nextCursor`.
+      schema: {type: string}
+
+  responses:
+    Unauthorized:
+      description: No demo session cookie was present.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    NotFound:
+      description: The resource does not exist in the selected environment.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Conflict:
+      description: The request conflicts with the current state.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    ValidationFailed:
+      description: The request body failed validation.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: {type: string}
+            message: {type: string}
+            details: {type: object}
+
+    Pagination:
+      type: object
+      properties:
+        total: {type: integer}
+        limit: {type: integer}
+        nextCursor: {type: [string, 'null']}
+
+    User:
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string, format: email}
+        name: {type: string}
+        role: {type: string}
+        environment: {type: string}
+        permissions: {type: array, items: {type: string}}
+
+    Project:
+      type: object
+      properties:
+        id: {type: string}
+        key: {type: string}
+        name: {type: string}
+        description: {type: string}
+        status: {type: string, enum: [active, paused, archived]}
+        priority: {type: string, enum: [low, medium, high]}
+        owner: {type: string, format: email}
+        tags: {type: array, items: {type: string}}
+        version: {type: integer}
+        taskCount: {type: integer}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+
+    NewProject:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        key: {type: string, maxLength: 8}
+        description: {type: string, maxLength: 2000}
+        priority: {type: string, enum: [low, medium, high], default: medium}
+        tags: {type: array, items: {type: string}, maxItems: 10}
+
+    ProjectPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        description: {type: string, maxLength: 2000}
+        status: {type: string, enum: [active, paused, archived]}
+        priority: {type: string, enum: [low, medium, high]}
+        tags: {type: array, items: {type: string}, maxItems: 10}
+
+    Task:
+      type: object
+      properties:
+        id: {type: string}
+        projectId: {type: string}
+        title: {type: string}
+        description: {type: [string, 'null']}
+        priority: {type: string, enum: [low, medium, high, urgent]}
+        status: {type: string, enum: [open, in_progress, blocked, done]}
+        assignee: {type: [string, 'null'], format: email}
+        labels: {type: array, items: {type: string}}
+        dueDate: {type: [string, 'null'], format: date-time}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+
+    NewTask:
+      type: object
+      required: [title, priority]
+      additionalProperties: false
+      properties:
+        title: {type: string, minLength: 1, maxLength: 200}
+        description: {type: string, maxLength: 4000}
+        priority: {type: string, enum: [low, medium, high, urgent]}
+        status: {type: string, enum: [open, in_progress, blocked, done], default: open}
+        assignee: {type: string, format: email}
+        labels: {type: array, items: {type: string}, maxItems: 10}
+        dueDate: {type: string, format: date-time}
+
+    TaskPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        title: {type: string, minLength: 1, maxLength: 200}
+        description: {type: string, maxLength: 4000}
+        priority: {type: string, enum: [low, medium, high, urgent]}
+        status: {type: string, enum: [open, in_progress, blocked, done]}
+        assignee: {type: [string, 'null'], format: email}
+        labels: {type: array, items: {type: string}, maxItems: 10}
+        dueDate: {type: string, format: date-time}
+
+    Comment:
+      type: object
+      properties:
+        id: {type: string}
+        taskId: {type: string}
+        author: {type: string, format: email}
+        body: {type: string}
+        createdAt: {type: string, format: date-time}
+
+    AuditEvent:
+      type: object
+      properties:
+        id: {type: string}
+        at: {type: string, format: date-time}
+        actor: {type: string, format: email}
+        action: {type: string}
+        target: {type: string}
+        source: {type: string, enum: [swagger-ui, webmcp-agent, system]}
+
+    Webhook:
+      type: object
+      properties:
+        id: {type: string}
+        url: {type: string, format: uri}
+        events: {type: array, items: {type: string}}
+        active: {type: boolean}
+        secretConfigured: {type: boolean}
+        createdAt: {type: string, format: date-time}
+
+    ExportJob:
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string, enum: [queued, running, complete, failed]}
+        progress: {type: integer, minimum: 0, maximum: 100}
+        format: {type: string, enum: [csv, json, ndjson]}
+        scope: {type: string}
+        createdAt: {type: string, format: date-time}
+        completedAt: {type: [string, 'null'], format: date-time}
+        downloadPath: {type: [string, 'null']}
