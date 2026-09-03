@@ -61,6 +61,50 @@ export function hasLiveValue(value: unknown): boolean {
  * Reporting truncates long values; execution merges full ones (they are the
  * person's own typed input, bound for the API they already chose).
  */
+/**
+ * Read one parameter's current form value out of the Swagger store.
+ *
+ * Three readers, in order, because no single selector is reliable across the
+ * whole lifecycle:
+ *  - `parameterValues` returns a plain `"<in>.<name>" -> value` map and is the
+ *    cheapest correct answer once a value has been committed.
+ *  - `parameterWithMeta` merges meta onto the parameter record, but while an
+ *    operation's `$ref`s are still resolving it maps an unresolved parameter
+ *    list and Swagger UI throws a TypeError.
+ *  - `getParameter` never throws, but returns the spec record *without* the
+ *    meta value merged, so it can only confirm the parameter exists — reading
+ *    `value` off it always yields undefined. It is last, and only ever used
+ *    when it actually carries a value.
+ *
+ * Each reader is guarded independently so one throwing does not hide the next.
+ */
+function readParamValue(system: any, pathMethod: string[], param: any): unknown {
+  const key = `${param.in}.${param.name}`;
+
+  try {
+    const values = system.specSelectors?.parameterValues?.(pathMethod);
+    const found = values?.get ? values.get(key) : undefined;
+    if (found !== undefined) return found;
+  } catch {
+    /* Unresolved subtree: fall through. */
+  }
+
+  try {
+    const withMeta = system.specSelectors?.parameterWithMeta?.(pathMethod, param.name, param.in);
+    const found = withMeta?.get ? withMeta.get('value') : undefined;
+    if (found !== undefined) return found;
+  } catch {
+    /* Swagger logs a TypeError mid-resolution; the reader above usually wins. */
+  }
+
+  try {
+    const stored = system.specSelectors?.getParameter?.(pathMethod, param.name, param.in);
+    return stored?.get ? stored.get('value') : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function readLiveValues(system: any, op: CompiledOperation, options: { truncate?: boolean } = {}): LiveValues {
   const truncate = options.truncate !== false;
   const live: LiveValues = {};
@@ -69,19 +113,7 @@ export function readLiveValues(system: any, op: CompiledOperation, options: { tr
   for (const param of op.raw?.parameters || []) {
     const group = param.in === 'path' ? 'path' : param.in === 'query' ? 'query' : param.in === 'header' ? 'headers' : null;
     if (!group || !param.name || isSensitiveName(param.name)) continue;
-    let value: unknown;
-    try {
-      // `getParameter` reads Swagger's form-state metadata directly. Prefer
-      // it over parameterWithMeta: during asynchronous $ref resolution the
-      // latter maps the unresolved parameter list and Swagger UI logs a
-      // TypeError even though a direct metadata read is already sufficient.
-      const stored = system.specSelectors?.getParameter?.(pathMethod, param.name, param.in);
-      value = stored?.get
-        ? stored.get('value')
-        : system.specSelectors?.parameterWithMeta?.(pathMethod, param.name, param.in)?.get?.('value');
-    } catch {
-      value = undefined;
-    }
+    const value = readParamValue(system, pathMethod, param);
     if (!hasLiveValue(value)) continue;
     (live[group] ??= {})[param.name] = plain(value, truncate);
   }
