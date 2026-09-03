@@ -27,6 +27,8 @@
 
 The agent calls the API through the exact environment, login, and request pipeline the developer already has open in the page. No AI SDK. No MCP server to install. No bearer token copied anywhere.
 
+Zoomed out, that one mechanism does four things worth naming on their own: it turns an existing, massive class of web page into an agent gateway with no new infrastructure; the exposure controls double as a real playground for trying an agent against a live API; the shared execution path doubles as a debugging surface where agent and human calls land in the same panel; and the plugin ships a genuine, reusable primitive for agent-attributed audit logging. See **[The bigger picture](#the-bigger-picture)** below for what's real about each of those and what isn't.
+
 **Live demo: <https://openapi-web-mcp.vercel.app>** · Apache-2.0 · [Repository](https://github.com/alliecatowo/openapi-web-mcp)
 
 ---
@@ -62,6 +64,20 @@ That gives real properties, not just configuration:
 - Malformed or hostile annotation values are **dropped, not guessed at**, so a bad annotation degrades to "no annotation" rather than to a weaker policy.
 
 Notably, the party that does *not* get a vote is the agent. Session locks are module state the tools never touch: no input schema carries a lock field, no tool reads or writes one. The agent observes only the *effect* — `agentPolicy` reports `locked: true` so it can make sense of a `LOCKED` denial and say so instead of retrying.
+
+## The bigger picture
+
+Strip away the mechanism for a moment and four separate claims are being made about what this project is. None of them require different code than what's described above — they're the same lattice and the same execution path, looked at from four angles.
+
+- **A new gateway for the web, not one more connector.** Wiring an agent to *an* API has always meant building a connector for that one API. OpenAPI documentation pages are already one of the most widely-deployed page types on the internet — the download numbers below make that concrete, not asserted. Every one of those pages is a pre-built, standardized, machine-readable description of a real API, sitting in a browser tab where a human is often already signed in. This plugin doesn't add a new kind of agent-friendly page to the web; it makes the pages already there — millions of Swagger UI installs — legible to an agent with one import and no new infrastructure. The gateway already exists; it was just never turned on for agents.
+
+- **A portable agent playground.** Every operation carries a live, per-operation control — **Full access**, **Read only**, or **Hidden** — right next to the same **Try it out** button a human uses, reversible from a dropdown, gone on reload (see *Live narrowing*, below). That's a genuine playground: an agent can be pointed at a real, stateful, authenticated API and turned loose to explore, with the worst case bounded by whatever level the page owner or the person at the keyboard has set — not by hoping the agent behaves. It's worth being precise about what kind of "sandbox" this is: there's no isolated compute or fake data wall — the demo's own **Sandbox** vs. **Production** server dropdown is the closer analogue for that. What this is instead is a supervised space to experiment against something real, with a kill switch always in reach.
+
+- **Interactive debugging, not just execution.** Tool calls don't run through a separate client — they run through Swagger UI's own `specActions.execute`, the identical code path **Try it out** uses, and the result lands in the identical response panel a human already reads. An agent's call and a person's call against the same endpoint, in the same session, render side by side in the same place. Comparing "what did the agent actually send" against "what would I have sent by hand" isn't a workflow bolted on afterward — it falls out of there never having been a second execution path to keep in sync.
+
+- **A new standard for agent-audited Swagger — a pattern, not just a demo trick.** The plugin exports `agentExecution` (`packages/swagger-ui-webmcp/src/swagger/state.ts`): module state set to the operation's key for the duration of an agent-driven call and cleared in a `finally` block when it completes. It exists so a page's own `requestInterceptor` can read it and tag agent traffic apart from human traffic. The demo does exactly that — a few lines in `apps/demo/src/main.ts` stamp same-origin requests with `X-Waypoint-Client: webmcp-agent` whenever `agentExecution.current` is set, and the demo API records the source on every write, visible at `GET /audit-events`. Nothing about that pattern is Waypoint-specific: any Swagger UI deployment that loads this plugin already has `agentExecution` available to read, and can tag its own backend's logs, database rows, or audit trail the same way — in whatever shape that backend already keeps them. Held to the same honest limit stated under *Security and limitations*: this is a **hint**, not an identity proof — any client could set the same header — but it's a hint the page didn't have before, exported specifically so a publisher can build a real "agent or human touched this" audit trail on top of it, on their own API, without forking this plugin.
+
+The four-way authority split above isn't replaced by any of this — it's *how* an agent's reach gets bounded on every one of these pages. These four points are what having that split shipped as a reusable plugin, instead of built bespoke per API, is actually for.
 
 ## Why the documentation page is the right place for this
 
