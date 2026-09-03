@@ -141,30 +141,32 @@ export async function executeOperation(
   const spec = getSpec(system);
   if (!currentServer(system, spec)) return fail('SPEC_INVALID', 'No selected server is available.');
 
-  // Empty or partial arguments fall back to whatever the person already typed
-  // into the operation's Try-it-out fields: explicit arguments always win,
-  // and the merged set is what gets written, sent, and rendered. Either side
-  // of the shared fields can start the work and the other can finish it.
-  const { merged: input } = mergeWithLiveValues(op, invocation, readLiveValues(system, op, { truncate: false }));
-
-  // Path parameters are structural: a missing one would silently request a
-  // literal "{id}" segment, so they are checked before anything is written.
-  for (const name of op.path.match(/\{([^}]+)\}/g) || []) {
-    const key = name.slice(1, -1);
-    const value = input.path?.[key];
-    if (value === undefined || value === null || value === '') {
-      return fail('INPUT_INVALID', `Required path parameter ${key} is missing.`);
-    }
-  }
-
-  const url = describeUrl(system, op, input);
-
   return serialize(async () => {
     if (signal?.aborted) return fail('ABORTED', 'The operation was aborted.');
 
     try {
       const operation = await resolveOperation(system, op);
       if (!operation) return fail('SPEC_NOT_READY', 'Swagger UI has not resolved this operation yet.');
+
+      // Empty or partial arguments fall back to whatever the person already
+      // typed into the operation's Try-it-out fields: explicit arguments
+      // always win. This must happen after Swagger has resolved $ref-backed
+      // parameters; parameterWithMeta assumes each entry is an Immutable
+      // record and otherwise throws while rendering the call.
+      const { merged: input } = mergeWithLiveValues(op, invocation, readLiveValues(system, op, { truncate: false }));
+
+      // Path parameters are structural: a missing one would silently request
+      // a literal "{id}" segment, so they are checked before anything is
+      // written.
+      for (const name of op.path.match(/\{([^}]+)\}/g) || []) {
+        const key = name.slice(1, -1);
+        const value = input.path?.[key];
+        if (value === undefined || value === null || value === '') {
+          return fail('INPUT_INVALID', `Required path parameter ${key} is missing.`);
+        }
+      }
+
+      const url = describeUrl(system, op, input);
 
       writeParameters(system, op, input);
       writeRequestBody(system, op, input);

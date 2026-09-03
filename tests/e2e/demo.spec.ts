@@ -165,7 +165,7 @@ async function fillBody(page: Page, block: any, value: string) {
 test.describe('Swagger UI without WebMCP', () => {
   test('remains an ordinary, fully usable documentation page', async ({ page }) => {
     await page.goto('/');
-    await expect(page.locator('.hero h1')).toHaveText('Waypoint Projects API');
+    await expect(page.locator('.hero h1')).toHaveText('Swagger UI WebMCP');
     await expect(page.locator('.swagger-ui')).toBeVisible({ timeout: 15000 });
     await expect(page.locator('#session')).toContainText('signed out');
 

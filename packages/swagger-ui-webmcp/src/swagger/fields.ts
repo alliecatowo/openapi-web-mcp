@@ -71,7 +71,14 @@ export function readLiveValues(system: any, op: CompiledOperation, options: { tr
     if (!group || !param.name || isSensitiveName(param.name)) continue;
     let value: unknown;
     try {
-      value = system.specSelectors?.parameterWithMeta?.(pathMethod, param.name, param.in)?.get?.('value');
+      // `getParameter` reads Swagger's form-state metadata directly. Prefer
+      // it over parameterWithMeta: during asynchronous $ref resolution the
+      // latter maps the unresolved parameter list and Swagger UI logs a
+      // TypeError even though a direct metadata read is already sufficient.
+      const stored = system.specSelectors?.getParameter?.(pathMethod, param.name, param.in);
+      value = stored?.get
+        ? stored.get('value')
+        : system.specSelectors?.parameterWithMeta?.(pathMethod, param.name, param.in)?.get?.('value');
     } catch {
       value = undefined;
     }
