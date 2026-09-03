@@ -1,0 +1,1 @@
+export function currentServer(system:any,spec:any){try{const selected=system.oas3Selectors?.selectedServer?.();const value=system.oas3Selectors?.serverEffectiveValue?.(selected);if(value)return value}catch{};return spec?.servers?.[0]?.url}
