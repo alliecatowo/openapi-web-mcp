@@ -117,10 +117,13 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   plugins: [deriveUnannotatedSpec, waypointApi],
   resolve: {
-    alias: {
-      react: path.resolve(root, '../../node_modules/react/index.js'),
-      'react-dom': path.resolve(root, '../../node_modules/react-dom/index.js')
-    }
+    alias: [
+      // Exact matches only: bare `react`/`react-dom` dedupe to one copy, while
+      // subpaths such as `react/jsx-runtime` (used by the plugin's lock UI)
+      // keep resolving inside the same package.
+      { find: /^react$/, replacement: path.resolve(root, '../../node_modules/react/index.js') },
+      { find: /^react-dom$/, replacement: path.resolve(root, '../../node_modules/react-dom/index.js') }
+    ]
   },
   server: { port: 4173 },
   build: { outDir: 'dist' }
