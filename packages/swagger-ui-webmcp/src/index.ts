@@ -1,10 +1,7 @@
 import { WebMcpRegistry, type RegistryConfig } from './webmcp/registry.js';
-import { mountConsole } from './ui/console.js';
-import { snapshot } from './swagger/context.js';
 
 export interface WebMcpPluginConfig extends RegistryConfig {
   enabled?: boolean;
-  showConsole?: boolean;
 }
 
 /**
@@ -12,7 +9,9 @@ export interface WebMcpPluginConfig extends RegistryConfig {
  *
  * Swagger UI must remain completely usable when WebMCP is absent, so every
  * capability here is feature-detected and every failure path leaves the normal
- * documentation page untouched.
+ * documentation page untouched. The plugin adds no UI of its own: the page
+ * stays an ordinary Swagger UI, and agent activity is visible through Swagger
+ * UI's own response panels.
  */
 export default function SwaggerUIWebMCP(system: any) {
   const readConfig = (): WebMcpPluginConfig => system.getConfigs?.().webMcp || {};
@@ -21,16 +20,9 @@ export default function SwaggerUIWebMCP(system: any) {
     const config = readConfig();
     if (config.enabled === false) return;
 
-    const agentConsole = mountConsole(config);
-
-    if (typeof document === 'undefined' || !(document as any).modelContext) {
-      agentConsole.setStatus('unavailable in this browser');
-      agentConsole.note('WebMCP is not available here. Swagger UI is fully functional.');
-      return;
-    }
+    if (typeof document === 'undefined' || !(document as any).modelContext) return;
 
     const registry = new WebMcpRegistry(system, {
-      console: agentConsole,
       // Read on every use rather than captured once: see RegistryConfig.settings.
       settings: () => {
         const live = readConfig();
@@ -38,30 +30,14 @@ export default function SwaggerUIWebMCP(system: any) {
           maxDirectOperationTools: live.maxDirectOperationTools ?? 64,
           maxBatchSteps: live.maxBatchSteps,
           operationFilter: live.operationFilter,
-          permissionMode: live.permissionMode || 'ask-for-edits',
+          policyResolver: live.policyResolver,
+          exposure: live.exposure,
           trustSpecAnnotations: live.trustSpecAnnotations
         };
-      },
-      onSummary: (summary) => {
-        const live = readConfig();
-        const context = snapshot(system);
-        agentConsole.setSummary({
-          toolCount: summary.toolCount,
-          pageMode: live.permissionMode || 'ask-for-edits',
-          server: context.server.effectiveUrl,
-          authorized: context.auth.authorizedSchemes.length,
-          withCredentials: context.auth.withCredentials,
-          allow: summary.allow,
-          confirm: summary.confirm,
-          blocked: summary.blocked,
-          hidden: summary.hidden,
-          trustSpecAnnotations: live.trustSpecAnnotations === true
-        });
       }
     });
 
     (system as any).__webMcpRegistry = registry;
-    agentConsole.setStatus('loading spec…');
     registry.initialize();
 
     // Server selection, authorization and spec changes all flow through the
@@ -86,4 +62,3 @@ export * from './openapi/types.js';
 export * from './policy/index.js';
 export { enumerateOperations, compileSchema } from './openapi/compiler.js';
 export { agentExecution } from './swagger/state.js';
-export type { AgentConsole, ConsentRequest } from './ui/console.js';

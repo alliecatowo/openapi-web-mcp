@@ -19,10 +19,12 @@ servers:
   - url: /api/production
     description: Production
 
-# Document-level default. Individual operations may tighten this (and, when the
-# publisher sets `webMcp.trustSpecAnnotations`, may also relax it).
+# Document-level default: every operation is an agent tool unless that operation
+# says otherwise. An operation may only tighten this default — hide itself or
+# require authorization — unless the page opts into `trustSpecAnnotations`.
+# Permission UX is the WebMCP client's job, so there are no consent keys here.
 x-webmcp:
-  policy: ask-for-edits
+  tool: write
 
 tags:
   - name: Account
@@ -45,7 +47,7 @@ paths:
       summary: Service health
       security: []
       x-webmcp:
-        policy: no-prompt
+        tool: read
       responses:
         '200':
           description: Service is reachable.
@@ -175,9 +177,8 @@ paths:
       tags: [Projects]
       summary: Delete an archived project
       x-webmcp:
-        policy: ask-first
+        tool: write
         destructive: true
-        reason: Permanently removes a project and all of its tasks.
       responses:
         '204': {description: Deleted.}
         '404': {$ref: '#/components/responses/NotFound'}
@@ -253,8 +254,7 @@ paths:
       tags: [Tasks]
       summary: Create a task
       x-webmcp:
-        policy: no-prompt
-        reason: Creating a task is cheap and reversible, so agents may do it without a prompt.
+        tool: write
       requestBody:
         required: true
         content:
@@ -290,8 +290,7 @@ paths:
       tags: [Tasks]
       summary: Update a task
       x-webmcp:
-        policy: no-prompt
-        reason: Task field edits are routine and fully visible in the audit log.
+        tool: write
       requestBody:
         required: true
         content:
@@ -311,8 +310,8 @@ paths:
       tags: [Tasks]
       summary: Delete a task
       x-webmcp:
+        tool: write
         destructive: true
-        reason: Deletes the task and its comments.
       responses:
         '204': {description: Deleted.}
         '404': {$ref: '#/components/responses/NotFound'}
@@ -365,6 +364,11 @@ paths:
       tags: [Tasks]
       summary: Update many tasks at once
       description: Applies up to 25 partial task updates and reports per-item success.
+      # Held at read by the x-webmcp block below (absent from the unannotated
+      # copy): the agent can see this operation and why it cannot call it, but
+      # bulk writes stay in human hands on this page.
+      x-webmcp:
+        tool: read
       requestBody:
         required: true
         content:
@@ -426,8 +430,7 @@ paths:
       tags: [Comments]
       summary: Comment on a task
       x-webmcp:
-        policy: no-prompt
-        reason: Comments are additive and attributed, so agents may post them directly.
+        tool: write
       requestBody:
         required: true
         content:
@@ -476,6 +479,12 @@ paths:
       operationId: getUsageReport
       tags: [Reports]
       summary: Usage report
+      description: Needs bearerAuth. The agent sees the tool but cannot call it until a human authorizes in Swagger UI.
+      security:
+        - bearerAuth: []
+      x-webmcp:
+        tool: read
+        requiresAuth: bearerAuth
       parameters:
         - name: days
           in: query
@@ -498,7 +507,12 @@ paths:
       operationId: createExport
       tags: [Exports]
       summary: Start an export job
-      description: Returns 202 with a job id. Poll `getExport` until the status is `complete`.
+      description: Returns 202 with a job id. Poll `getExport` until the status is `complete`. Needs the waypointKey header credential.
+      security:
+        - waypointKey: []
+      x-webmcp:
+        tool: write
+        requiresAuth: waypointKey
       requestBody:
         required: true
         content:
@@ -526,6 +540,12 @@ paths:
       operationId: getExport
       tags: [Exports]
       summary: Get export job status
+      description: Needs the waypointQueryKey query credential — a different scheme from the export creation call.
+      security:
+        - waypointQueryKey: []
+      x-webmcp:
+        tool: read
+        requiresAuth: waypointQueryKey
       responses:
         '200':
           description: Current job state.
@@ -557,8 +577,7 @@ paths:
       tags: [Webhooks]
       summary: Register a webhook
       x-webmcp:
-        policy: ask-first
-        reason: Sends future API events to an external URL, so a human confirms the destination.
+        tool: write
       requestBody:
         required: true
         content:
@@ -596,8 +615,8 @@ paths:
       tags: [Webhooks]
       summary: Delete a webhook
       x-webmcp:
+        tool: write
         destructive: true
-        reason: Stops event delivery to an external system.
       responses:
         '204': {description: Deleted.}
         '404': {$ref: '#/components/responses/NotFound'}
@@ -609,8 +628,7 @@ paths:
       summary: Create a charge
       description: Moves money. Fully usable by a signed-in human in Swagger UI.
       x-webmcp:
-        policy: deny
-        reason: Payments are out of scope for agents on this documentation page.
+        tool: hidden
       requestBody:
         required: true
         content:
@@ -634,8 +652,7 @@ paths:
       summary: List API keys
       description: Returns key metadata only. Never returns key material.
       x-webmcp:
-        policy: deny
-        reason: Credential metadata is never exposed to the agent capability set.
+        tool: hidden
       responses:
         '200': {description: API key metadata.}
 
@@ -645,9 +662,8 @@ paths:
       tags: [Admin]
       summary: Reset demo data
       x-webmcp:
-        policy: ask-first
+        tool: write
         destructive: true
-        reason: Discards every change made in the selected environment.
       requestBody:
         required: true
         content:
@@ -661,6 +677,21 @@ paths:
         '200': {description: The environment was reseeded.}
 
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Demo bearer token. The demo page shows the token to paste into the authorize dialog.
+    waypointKey:
+      type: apiKey
+      in: header
+      name: X-Waypoint-Key
+      description: Demo API key sent as a header. The demo page shows the key to paste into the authorize dialog.
+    waypointQueryKey:
+      type: apiKey
+      in: query
+      name: key
+      description: Demo API key sent as a query parameter. The demo page shows the key to paste into the authorize dialog.
   parameters:
     ProjectId:
       name: projectId

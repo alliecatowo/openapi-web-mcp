@@ -37,6 +37,23 @@ const SESSION_COOKIE = 'waypoint_session=demo';
 const ENVIRONMENTS: Environment[] = ['sandbox', 'production'];
 const ACTOR = 'dev@waypoint.local';
 
+/**
+ * Demo credentials for the three machine-authorizable schemes in the OpenAPI
+ * document (`bearerAuth`, `waypointKey`, `waypointQueryKey`). They are printed
+ * on the demo page next to the authorize instructions, so a human can paste
+ * them into Swagger UI's authorize dialog. Nothing real is protected by them.
+ */
+export const DEMO_BEARER_TOKEN = 'waypoint-demo-bearer';
+export const DEMO_HEADER_KEY = 'waypoint-demo-key';
+export const DEMO_QUERY_KEY = 'waypoint-demo-query-key';
+
+const bearerOk = (req: ApiRequest) => req.headers.authorization === `Bearer ${DEMO_BEARER_TOKEN}`;
+const headerKeyOk = (req: ApiRequest) => req.headers['x-waypoint-key'] === DEMO_HEADER_KEY;
+const queryKeyOk = (req: ApiRequest) => req.query.get('key') === DEMO_QUERY_KEY;
+
+const schemeFail = (scheme: string, hint: string): ApiResponse =>
+  fail(401, 'WAYPOINT_AUTH_REQUIRED', `This endpoint needs ${scheme}. ${hint}`);
+
 const json = (status: number, body: unknown, headers?: Record<string, string>): ApiResponse => ({ status, body, headers });
 
 const fail = (status: number, code: string, message: string, details?: unknown): ApiResponse =>
@@ -146,12 +163,23 @@ export function handleRequest(req: ApiRequest): ApiResponse {
   if (!ENVIRONMENTS.includes(environment)) {
     return fail(404, 'NOT_FOUND', 'Unknown environment. Use the sandbox or production server.');
   }
-  if (!signedIn(req)) {
+  const rest = parts.slice(1);
+
+  // Three operations are gated on machine-authorizable schemes instead of the
+  // demo session, so the SEE-vs-CALL story can be shown with Swagger UI's own
+  // authorize dialog: the agent sees the tool, calls it, gets AUTH_REQUIRED,
+  // the human authorizes, and the same call succeeds. Everything else still
+  // needs the session cookie from the page's Sign in button.
+  const gatedScheme =
+    rest[0] === 'reports' && rest[1] === 'usage' && method === 'GET' ? 'bearer'
+    : rest[0] === 'exports' && rest.length === 1 && method === 'POST' ? 'header-key'
+    : rest[0] === 'exports' && rest.length === 2 && method === 'GET' ? 'query-key'
+    : null;
+  if (!gatedScheme && !signedIn(req)) {
     return fail(401, 'NOT_AUTHENTICATED', 'Sign in to the demo to use this endpoint.');
   }
 
   const store = storeFor(environment);
-  const rest = parts.slice(1);
   const source = sourceOf(req);
   const body = (req.body ?? {}) as Record<string, unknown>;
 
@@ -457,6 +485,9 @@ export function handleRequest(req: ApiRequest): ApiResponse {
 
     case 'reports': {
       if (rest[1] !== 'usage' || method !== 'GET') break;
+      if (!bearerOk(req)) {
+        return schemeFail('bearerAuth', 'Authorize bearerAuth in Swagger UI with the demo bearer token.');
+      }
       const days = Math.min(Math.max(Number(req.query.get('days')) || 14, 1), 90);
       const series = Array.from({ length: days }, (_, index) => ({
         date: new Date(Date.now() - (days - index - 1) * 86_400_000).toISOString().slice(0, 10),
@@ -479,6 +510,9 @@ export function handleRequest(req: ApiRequest): ApiResponse {
 
     case 'exports': {
       if (rest.length === 1 && method === 'POST') {
+        if (!headerKeyOk(req)) {
+          return schemeFail('waypointKey', 'Authorize waypointKey in Swagger UI with the demo header key.');
+        }
         const format = requireEnum(body.format, 'format', ['csv', 'json', 'ndjson'] as const, 'json');
         if (isResponse(format)) return format;
         const job: ExportJob = {
@@ -494,6 +528,9 @@ export function handleRequest(req: ApiRequest): ApiResponse {
         return json(202, { ...job, pollPath: `/exports/${job.id}` }, { Location: `/api/${environment}/exports/${job.id}` });
       }
       if (rest.length === 2 && method === 'GET') {
+        if (!queryKeyOk(req)) {
+          return schemeFail('waypointQueryKey', 'Authorize waypointQueryKey in Swagger UI with the demo query key.');
+        }
         const job = store.exports.find((j) => j.id === rest[1]);
         if (!job) return fail(404, 'NOT_FOUND', `No export job "${rest[1]}".`);
         return json(200, refreshJob(job));

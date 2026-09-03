@@ -58,12 +58,26 @@ SwaggerUI({
   dom_id: "#swagger-ui",
   url: "/openapi.yaml",
   plugins: [SwaggerUIWebMCP],          <span class="hl">// ← the whole integration</span>
-  webMcp: { permissionMode: "ask-for-edits" }
+  webMcp: { exposure: "write" }
 });</code></pre>
         <p>
           No AI SDK. No MCP server to install. No bearer token leaves the page. The agent inherits whichever
           server you picked in the dropdown below and whatever session you are already signed into.
         </p>
+      </section>
+
+      <section class="auth-demo" aria-label="Demo authorization">
+        <h2>Try the SEE-vs-CALL demo</h2>
+        <p>
+          Three operations declare <code>x-webmcp.requiresAuth</code> and stay visible but uncallable until you
+          authorize in Swagger UI below (the <strong>Authorize</strong> button). An agent calling one early gets a
+          structured <code>AUTH_REQUIRED</code> error; after you authorize, the same call succeeds.
+        </p>
+        <ul>
+          <li><code>bearerAuth</code> (HTTP bearer, gates the usage report): <code>waypoint-demo-bearer</code></li>
+          <li><code>waypointKey</code> (header <code>X-Waypoint-Key</code>, gates export creation): <code>waypoint-demo-key</code></li>
+          <li><code>waypointQueryKey</code> (query <code>key</code>, gates export status): <code>waypoint-demo-query-key</code></li>
+        </ul>
       </section>
 
       <div id="swagger-ui"></div>

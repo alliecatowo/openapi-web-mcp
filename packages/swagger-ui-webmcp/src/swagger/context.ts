@@ -16,10 +16,10 @@ export function specFingerprint(spec: any): string {
 }
 
 export interface PolicyContext {
-  pageMode: string;
+  pageExposure: string;
   trustSpecAnnotations: boolean;
-  allow: number;
-  confirm: number;
+  read: number;
+  write: number;
   blocked: number;
   hidden: number;
 }
@@ -61,6 +61,6 @@ export function snapshot(system: any, direct = 0, limit?: number, policy?: Polic
       directToolsRegistered: direct,
       directToolLimit: limit
     },
-    policy: policy ?? { pageMode: 'ask-for-edits', trustSpecAnnotations: false, allow: 0, confirm: 0, blocked: 0, hidden: 0 }
+    policy: policy ?? { pageExposure: 'write', trustSpecAnnotations: false, read: 0, write: 0, blocked: 0, hidden: 0 }
   };
 }

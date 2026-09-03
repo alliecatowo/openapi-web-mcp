@@ -1,41 +1,46 @@
 import { enumerateOperations } from '../openapi/enumerate.js';
 import { getSpec, snapshot, specFingerprint } from '../swagger/context.js';
+import { authorizedSchemes } from '../swagger/auth.js';
 import { executeOperation } from '../swagger/execute.js';
 import type { CompiledOperation } from '../openapi/types.js';
-import type { PermissionMode } from '../policy/index.js';
+import { authSatisfied, toExposure, type Policy, type ToolExposure } from '../policy/index.js';
 import { coreDefinitions } from './core-tools.js';
 import { operationDefinition } from './operation-tool.js';
 import { authorize, authorizeBatch, operationLabel, policyFor, type GateContext } from './gate.js';
 import { toolError } from './errors.js';
-import type { AgentConsole } from '../ui/console.js';
 
 type ModelContext = { registerTool: (definition: any, options?: any) => any };
 
 export interface RegistryConfig {
   maxDirectOperationTools?: number;
   operationFilter?: (op: CompiledOperation) => boolean;
-  permissionMode?: PermissionMode;
-  /** Let `x-webmcp` in the document relax the page policy, not only tighten it. */
+  /** Page-level default exposure: `read`, `write`, or `hidden`. No aliases. */
+  exposure?: ToolExposure;
+  /** Let `x-webmcp` in the document relax the page exposure, not only tighten it. */
   trustSpecAnnotations?: boolean;
+  /**
+   * Page-supplied policy source, consulted per operation. It composes with
+   * `x-webmcp` and may only tighten the exposure those sources produced,
+   * because taking a capability away is the one safe direction.
+   */
+  policyResolver?: (op: CompiledOperation) => Policy | undefined;
   maxBatchSteps?: number;
-  console?: AgentConsole;
-  onSummary?: (summary: PolicySummary) => void;
   /**
    * Reads the page's `webMcp` config on demand.
    *
    * Swagger UI has not finished merging user configuration when a plugin's
    * `afterLoad` runs, so settings captured at construction time can silently be
    * defaults. Everything policy-relevant is therefore re-read per use, which
-   * also lets a publisher change the mode at runtime.
+   * also lets a publisher change the exposure at runtime.
    */
   settings?: () => Partial<RegistryConfig>;
 }
 
-export interface PolicySummary {
+export interface ExposureSummary {
   toolCount: number;
   total: number;
-  allow: number;
-  confirm: number;
+  read: number;
+  write: number;
   blocked: number;
   hidden: number;
   unsupported: number;
@@ -44,30 +49,16 @@ export interface PolicySummary {
 const DEFAULT_MAX_TOOLS = 64;
 const DEFAULT_MAX_BATCH = 10;
 
-const noopConsole: AgentConsole = {
-  setStatus: () => {},
-  setSummary: () => {},
-  requestConsent: async () => 'deny',
-  beginCall: () => () => {},
-  note: () => {},
-  element: undefined
-};
-
 export class WebMcpRegistry {
   private generation?: AbortController;
   private fingerprint = '';
   private direct = 0;
-  private summary: PolicySummary = { toolCount: 0, total: 0, allow: 0, confirm: 0, blocked: 0, hidden: 0, unsupported: 0 };
-  /** Grants a human made for the rest of this page session. */
-  private readonly remembered = new Set<string>();
-  private readonly agentConsole: AgentConsole;
+  private summary: ExposureSummary = { toolCount: 0, total: 0, read: 0, write: 0, blocked: 0, hidden: 0, unsupported: 0 };
 
   constructor(
     private system: any,
     private config: RegistryConfig = {}
-  ) {
-    this.agentConsole = config.console ?? noopConsole;
-  }
+  ) {}
 
   /** Current effective settings: constructor values, overridden by live config. */
   private settings(): RegistryConfig {
@@ -77,10 +68,12 @@ export class WebMcpRegistry {
   private get gate(): GateContext {
     const settings = this.settings();
     return {
-      pageMode: settings.permissionMode || 'ask-for-edits',
+      pageExposure: toExposure(settings.exposure) ?? 'write',
       trustSpecAnnotations: settings.trustSpecAnnotations === true,
-      console: this.agentConsole,
-      remembered: this.remembered
+      policyResolver: settings.policyResolver,
+      // Snapshot per use, never cached: authorizing in Swagger UI must flip
+      // the next call from AUTH_REQUIRED to success with no re-registration.
+      authorizedSchemes: authorizedSchemes(this.system).map((scheme) => scheme.name)
     };
   }
 
@@ -113,29 +106,37 @@ export class WebMcpRegistry {
 
   /** Operations that get their own registered tool: visible, supported and callable. */
   private registrable(op: CompiledOperation): boolean {
-    return this.visible(op) && op.supported && policyFor(op, this.gate).decision !== 'block';
+    const policy = policyFor(op, this.gate);
+    return this.visible(op) && op.supported && !policy.blocked;
   }
 
   private describePolicy(op: CompiledOperation) {
-    const policy = policyFor(op, this.gate);
+    const gate = this.gate;
+    const policy = policyFor(op, gate);
+    const authorized = authSatisfied(policy.requiresAuth, gate.authorizedSchemes);
     return {
-      decision: policy.decision,
+      exposure: policy.exposure,
+      readOnly: op.readOnly,
       destructive: policy.destructive,
-      // `reason` is publisher prose. It stays out of tool metadata; the agent
-      // only learns *that* a human will be asked, not the marketing copy.
-      requiresApproval: policy.decision === 'confirm',
+      callable: !policy.hidden && !policy.blocked && authorized,
+      requiresAuth: policy.requiresAuth
+        ? policy.requiresAuth.any
+          ? ('any' as const)
+          : [...policy.requiresAuth.schemes]
+        : null,
+      authorized,
       declaredIn: policy.source === 'document' ? ('openapi-document' as const) : ('page' as const)
     };
   }
 
-  private computeSummary(ops: CompiledOperation[]): PolicySummary {
-    const summary: PolicySummary = { toolCount: this.direct, total: ops.length, allow: 0, confirm: 0, blocked: 0, hidden: 0, unsupported: 0 };
+  private computeSummary(ops: CompiledOperation[]): ExposureSummary {
+    const summary: ExposureSummary = { toolCount: this.direct, total: ops.length, read: 0, write: 0, blocked: 0, hidden: 0, unsupported: 0 };
     for (const op of ops) {
       const policy = policyFor(op, this.gate);
       if (policy.hidden) summary.hidden += 1;
-      else if (policy.decision === 'block') summary.blocked += 1;
-      else if (policy.decision === 'confirm') summary.confirm += 1;
-      else summary.allow += 1;
+      else if (policy.blocked) summary.blocked += 1;
+      else if (op.readOnly) summary.read += 1;
+      else summary.write += 1;
       if (!op.supported) summary.unsupported += 1;
     }
     return summary;
@@ -160,10 +161,10 @@ export class WebMcpRegistry {
   private policyContext() {
     const gate = this.gate;
     return {
-      pageMode: gate.pageMode,
+      pageExposure: gate.pageExposure,
       trustSpecAnnotations: gate.trustSpecAnnotations,
-      allow: this.summary.allow,
-      confirm: this.summary.confirm,
+      read: this.summary.read,
+      write: this.summary.write,
       blocked: this.summary.blocked,
       hidden: this.summary.hidden
     };
@@ -186,8 +187,8 @@ export class WebMcpRegistry {
     // direct tools, so an agent's capability set stays legible.
     const list = ops.length > cap ? [] : ops.filter((op) => this.registrable(op));
 
-    // The gate is passed as a thunk so a runtime permission-mode change applies
-    // to already-registered tools without waiting for a rebuild.
+    // The gate is passed as a thunk so a runtime exposure change applies to
+    // already-registered tools without waiting for a rebuild.
     const registrations = list.map((op) =>
       this.register(operationDefinition(this.system, op, controller.signal, () => this.gate), controller)
     );
@@ -199,7 +200,6 @@ export class WebMcpRegistry {
       this.direct = list.length;
       this.summary = this.computeSummary(ops);
       this.summary.toolCount = list.length;
-      this.settings().onSummary?.(this.summary);
     };
 
     if (registrations.some((x: any) => x && typeof x.then === 'function')) {
@@ -294,21 +294,19 @@ export class WebMcpRegistry {
     if (resolved.error) return resolved.error;
     const op = resolved.op!;
 
-    const decision = await authorize(op, input, this.gate);
+    const decision = authorize(op, this.gate);
     if (!decision.ok) return decision.error;
 
-    const finish = this.agentConsole.beginCall(operationLabel(op), decision.policy.decision);
-    const result = await executeOperation(this.system, op, input, signal);
-    finish(result.ok ? String(result.response?.status ?? 'ok') : (result.error?.code ?? 'failed'), result.ok);
-    return result;
+    return executeOperation(this.system, op, input, signal);
   }
 
   /**
-   * Run several operations from the current document under a single approval.
+   * Run several operations from the current document in order.
    *
-   * Every step is resolved and policy-checked before anything executes, so the
-   * user approves a plan they can actually read, and a batch never half-applies
-   * because a later step turned out to be forbidden.
+   * Every step is resolved and exposure-checked before anything executes, so a
+   * batch never half-applies a plan. The whole plan is visible in the tool's
+   * input schema and the tool carries `destructiveHint: true`, so the WebMCP
+   * client gates the batch invocation itself as a single unit.
    */
   async batch(input: any, signal?: AbortSignal) {
     const raw = Array.isArray(input?.steps) ? input.steps : [];
@@ -323,7 +321,7 @@ export class WebMcpRegistry {
       steps.push({ op: resolved.op!, input: step });
     }
 
-    const decision = await authorizeBatch(steps, this.gate);
+    const decision = authorizeBatch(steps, this.gate);
     if (!decision.ok) return decision.error;
 
     const stopOnError = input?.stopOnError !== false;
@@ -334,9 +332,7 @@ export class WebMcpRegistry {
         results.push({ index, operation: operationLabel(step.op), ok: false, error: { code: 'ABORTED', message: 'The batch was aborted.' } });
         break;
       }
-      const finish = this.agentConsole.beginCall(`${operationLabel(step.op)} (batch ${index + 1}/${steps.length})`, decision.policy.decision);
       const result = await executeOperation(this.system, step.op, step.input, signal);
-      finish(result.ok ? String(result.response?.status ?? 'ok') : (result.error?.code ?? 'failed'), result.ok);
       results.push({ index, operation: operationLabel(step.op), ...result });
       if (!result.ok && stopOnError) break;
     }

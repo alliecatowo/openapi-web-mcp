@@ -12,7 +12,7 @@ export function coreDefinitions(api: any) {
       title: 'OpenAPI context',
       description:
         'Read the current Swagger UI API context: selected server, safe authorization status, operation counts, ' +
-        'and how many operations the page policy allows, gates behind human approval, or withholds.',
+        'and how many operations the publisher exposes to agents as reads or writes, holds back, or hides.',
       inputSchema: { type: 'object', additionalProperties: false },
       annotations: { readOnlyHint: true },
       execute: () => api.context()
@@ -51,7 +51,7 @@ export function coreDefinitions(api: any) {
       title: 'Execute OpenAPI operation',
       description:
         'Execute one operation that exists in the current Swagger UI OpenAPI document, using its live server and ' +
-        'authorization state. Operations the publisher gated may pause for human approval in the page.',
+        'authorization state. Permissioning happens in the WebMCP client; this page never prompts.',
       inputSchema: {
         type: 'object',
         properties: { operation: { type: 'string' }, ...invocationProperties },
@@ -65,8 +65,9 @@ export function coreDefinitions(api: any) {
       name: 'openapi_execute_batch',
       title: 'Execute a batch of OpenAPI operations',
       description:
-        'Run several operations from the current document in order under a single human approval. ' +
-        'All steps are policy-checked before any of them run; if one is forbidden, nothing executes. ' +
+        'Run several operations from the current document in order. The full plan is visible in the input schema, ' +
+        'and the tool is registered with destructiveHint, so the WebMCP client gates the whole invocation as one unit. ' +
+        'All steps are exposure-checked before any of them run; if one is not exposed, nothing executes. ' +
         `At most ${api.maxBatchSteps} steps.`,
       inputSchema: {
         type: 'object',
@@ -91,7 +92,7 @@ export function coreDefinitions(api: any) {
         required: ['steps'],
         additionalProperties: false
       },
-      annotations: { readOnlyHint: false, untrustedContentHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: true, untrustedContentHint: true },
       execute: (input: any, ctx: any) => api.batch(input, ctx?.signal)
     }
   ];

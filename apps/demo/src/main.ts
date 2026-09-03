@@ -67,7 +67,7 @@ const ui = SwaggerUI({
     // This demo publishes both the page and the document, so `x-webmcp` in the
     // document is authoritative. The safe default is to let it only tighten.
     trustSpecAnnotations: true,
-    permissionMode: 'ask-for-edits'
+    exposure: 'write'
   },
   onComplete: () => {
     statusText.textContent = 'Swagger UI ready · WebMCP activates automatically when available';

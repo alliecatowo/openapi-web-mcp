@@ -13,12 +13,9 @@ export type WebMcpErrorCode =
   | 'ABORTED'
   | 'RESPONSE_TOO_LARGE'
   | 'SWAGGER_EXECUTION_ERROR'
-  | 'PERMISSION_REQUIRED'
   | 'READ_ONLY_MODE'
-  /** The OpenAPI document marks this operation as never available to agents. */
+  /** The resolved exposure policy hides this operation from agents. */
   | 'OPERATION_DENIED'
-  /** The resolved permission policy blocks this call. */
-  | 'POLICY_BLOCKED'
   | 'BATCH_TOO_LARGE'
   | 'INTERNAL_ERROR';
 
