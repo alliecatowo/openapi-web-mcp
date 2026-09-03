@@ -48,7 +48,6 @@ What I personally still have to do before this entry is safely submitted.
 
 - [ ] Re-check <https://webmcp.devpost.com/rules> for any change since the 2026-09-02 verification recorded in SUBMISSION.md § 1.
 - [ ] Load <https://openapi-web-mcp.vercel.app> in a fresh private window: sign in works, tools register, a read and a write succeed.
-- [ ] Confirm the GitHub sidebar reads "Apache-2.0".
 - [ ] Confirm the YouTube video is publicly playable while signed out.
 - [ ] Run `git rev-parse HEAD` and record the submitted SHA in SUBMISSION.md § 3.
 - [ ] Confirm the deployed Vercel build matches that SHA.
