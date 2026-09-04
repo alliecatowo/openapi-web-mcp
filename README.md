@@ -289,7 +289,7 @@ The dev server serves the demo API in-process through the same router the deploy
 
 ```bash
 npm run typecheck      # tsc -b
-npm test               # 119 unit tests (vitest)
+npm test               # 120 unit tests (vitest)
 npm run build          # plugin + demo
 npm run test:e2e       # 34 Playwright end-to-end tests
 ```

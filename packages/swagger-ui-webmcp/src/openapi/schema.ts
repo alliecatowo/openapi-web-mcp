@@ -78,9 +78,13 @@ export function compileSchema(
       }
     } else if (keyword === 'required') {
       // Drop any excluded property from `required` too, so the schema never
-      // asks a caller to supply a field that was just removed.
-      const kept = (value as unknown[]).filter((name) => typeof name === 'string' && !isSensitiveName(name));
-      if (kept.length) out.required = kept;
+      // asks a caller to supply a field that was just removed. Non-array
+      // `required` (the common `required: true` misuse) is dropped rather
+      // than passed through, since it is not valid at schema level anyway.
+      if (Array.isArray(value)) {
+        const kept = value.filter((name) => typeof name === 'string' && !isSensitiveName(name));
+        if (kept.length) out.required = kept;
+      }
     } else if (keyword === 'items') {
       out.items = compileSchema(value, depth + 1, document, nextSeen);
     } else if (COMPOSITE_KEYWORDS.has(keyword)) {

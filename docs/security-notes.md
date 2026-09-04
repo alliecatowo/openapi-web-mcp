@@ -23,6 +23,14 @@ While writing a regression test for the fix above, `isSensitiveName('password')`
 
 This function backs every credential-shape check in the plugin, not just request bodies — response header redaction (`swagger/responses.ts`), authorized-header redaction (`swagger/auth.ts`), and live Try-it-out field reads (`swagger/fields.ts`) all call it too, so the fix applies uniformly rather than only where the review started.
 
+The matcher is deliberately conservative (substring and `-key` suffix); a legitimate field such as `sortKey` or `passwordless` is excluded too, and the operation is still callable by a human through Try it out.
+
+### 3. A regression the fix itself introduced, caught before it shipped
+
+The first version of the `required`-pruning fix above did `(value as unknown[]).filter(...)` unconditionally. Real-world (invalid but tolerated) OpenAPI documents sometimes put `required: true` inside a property schema instead of a `required` array on the parent object — `origin/main` passed that value through untouched, but the new code called `.filter` on it and threw. `enumerateOperations` has no try/catch around schema compilation, so an uncaught exception there meant **zero tools registered** for the whole document, not just the offending operation — and the demo's `#specUrl`/`?spec=` entry points mean a judge loading an arbitrary spec could have hit this. Caught in review before the commit was pushed, not after.
+
+**Fix:** the `required` branch now checks `Array.isArray(value)` first and drops non-array `required` values instead of processing them. Covered by a new test in `tests/unit/openapi.test.ts` that calls `compileSchema` directly with a `required: true` property and asserts it compiles instead of throwing.
+
 ## How it was found
 
 Code review, not a scanner or a fuzzer: reading `enumerate.ts` and `schema.ts` side by side against the README's claim, then, before touching the fix, writing a test that called `isSensitiveName` directly with the two names the review was motivated by.
@@ -34,7 +42,7 @@ Two before/after test suites, both written to fail against the pre-fix code and 
 - [`tests/unit/openapi.test.ts`](../packages/swagger-ui-webmcp/tests/unit/openapi.test.ts) — `describe('credential-shaped request body properties are excluded', ...)`: a login operation with `password`, `apiKey`, and a nested `profile.secret` in its request body. Confirms each is dropped from `properties`, dropped from `required`, and does not appear anywhere in the serialized schema — while an ordinary field like `username` survives.
 - [`tests/unit/sanitize.test.ts`](../packages/swagger-ui-webmcp/tests/unit/sanitize.test.ts) (new file) — exercises `isSensitiveName` directly: the literal word `password` in several forms, camelCase names ending in `Key`, the previously-covered reserved names (still covered), and a check that ordinary names (`monkey`, `displayName`, `username`, `title`) are not falsely flagged.
 
-Both suites were run against the pre-fix code first and confirmed to fail (`password`/`apiKey` reached the compiled schema; `isSensitiveName('password')` and `isSensitiveName('apiKey')` both returned `false`), then run again after the fix and confirmed to pass. `npm test` — the full suite, unit tests only — went from 107 passing tests before this review to 119 after: 8 tests for this fix plus 4 for the unrelated fix documented below, all passing, nothing else broken. `npm run typecheck` and `npm run build` were also run clean after the change.
+Both suites were run against the pre-fix code first and confirmed to fail (`password`/`apiKey` reached the compiled schema; `isSensitiveName('password')` and `isSensitiveName('apiKey')` both returned `false`), then run again after the fix and confirmed to pass. `npm test` — the full suite, unit tests only — went from 107 passing tests before this review to 120 after: 8 tests for the body-property fix, 4 for the unrelated tool-cap fix documented below, and 1 for the `required: true` regression documented above, all passing, nothing else broken. `npm run typecheck` and `npm run build` were also run clean after the change.
 
 ## A second, unrelated finding: stale tool-cap metadata
 
