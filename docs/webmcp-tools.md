@@ -163,7 +163,7 @@ The safe name is derived from the `operationId`, or from method and path when th
 
 The input schema is the same `path` / `query` / `headers` / `body` grouping as the generic executor, restricted to the parameters the operation actually declares. Path parameters are required. Parameter names that look like credentials are excluded. JSON request bodies are preferred, then `+json`, then `application/x-www-form-urlencoded`, then `text/plain`.
 
-Tool descriptions are assembled from structural facts only — method, path, and the fact that the page's current server and authorization are used. OpenAPI prose never lands in a tool description. Annotations are `readOnlyHint` (true for GET/HEAD/OPTIONS), `destructiveHint` (from `x-webmcp.destructive`), and `untrustedContentHint` (always true: spec and API content flow out through these tools).
+Tool descriptions are assembled from structural facts only — method, path, and the fact that the page's current server and authorization are used. OpenAPI prose never lands in a tool description. Annotations are `readOnlyHint` (true for GET/HEAD/OPTIONS), `destructiveHint` (from `x-webmcp.destructive`), `costHint` (from `x-webmcp.costHint`, plus a `costNote` string when the publisher gave one), and `untrustedContentHint` (always true: spec and API content flow out through these tools).
 
 An operation is **not** registered as a direct tool when it is hidden, filtered out, unsupported, or its resolved level is `read` while the method is a write. It can still be inspected by `openapi_get_operation` when it is merely held (but not when hidden). Authorization-gated operations ARE registered: the gate is evaluated at call time, not at registration time.
 
@@ -178,6 +178,8 @@ Documents with more operations than `maxDirectOperationTools` (default 64) regis
   "exposure": "write",
   "readOnly": false,
   "destructive": true,
+  "costHint": false,
+  "costNote": null,
   "callable": true,
   "requiresAuth": ["bearerAuth"],
   "authorized": false,
@@ -192,6 +194,8 @@ Documents with more operations than `maxDirectOperationTools` (default 64) regis
 | `exposure` | `read` \| `write` \| `hidden` | The resolved level, including this session's locks. Never `hidden` here — hidden operations are not reported at all. |
 | `readOnly` | boolean | True for GET/HEAD/OPTIONS. |
 | `destructive` | boolean | The publisher marked the operation irreversible. Surfaces as `destructiveHint`. |
+| `costHint` | boolean | The publisher marked the operation costly or otherwise consequential. Surfaces as `costHint` on the registered tool. |
+| `costNote` | `null` \| string | The publisher's optional description of the cost or consequence, when they gave one. Surfaces as `costNote`. |
 | `callable` | boolean | Whether a call would be attempted right now: false when held, view-locked, or when `requiresAuth` is unsatisfied by live auth state. |
 | `requiresAuth` | `null` \| `"any"` \| `string[]` | The authorization gate, if any. A list means ANY of the schemes. |
 | `authorized` | boolean | Whether Swagger UI's live auth state currently satisfies the gate. |
@@ -210,6 +214,7 @@ x-webmcp:
   tool: read                # read | write | hidden
   requiresAuth: bearerAuth  # true | scheme name | [names]
   destructive: true         # boolean
+  costHint: true            # true | a description string
 ```
 
 | Field | Type | Notes |
@@ -217,8 +222,11 @@ x-webmcp:
 | `tool` | string enum | Any other value is dropped. The operation's value wins over the root's. |
 | `requiresAuth` | `true` \| string \| string[] | `true` needs any live authorization; names need ANY of those schemes authorized. The operation's value wins over the root's. Anything else is dropped. |
 | `destructive` | boolean | Only the literal `true` is honoured. OR-ed across operation, root, and resolver. |
+| `costHint` | `true` \| string | `true` flags the operation as costly or consequential with no further detail; a non-empty string does the same and supplies a description (e.g. `"$0.02 per call"`). OR-ed across operation, root, and resolver — a description from any source survives even if another source only sent `true`. Anything else (`false`, a number, an empty string) is dropped. |
 
-Parsing keeps only values this version understands. A non-object, an array, `tool: "sometimes"`, `requiresAuth: 42`, `destructive: "yes"` — each is dropped, and an annotation left with no recognised fields is treated as absent. A malformed or hostile annotation degrades to "no annotation", never to a weaker policy. There are no legacy aliases: the old `policy`/`agent` keys, `reason` prose, and the `allow`/`confirm`/`block` and permission-mode names are ignored entirely.
+Parsing keeps only values this version understands. A non-object, an array, `tool: "sometimes"`, `requiresAuth: 42`, `destructive: "yes"`, `costHint: 0` — each is dropped, and an annotation left with no recognised fields is treated as absent. A malformed or hostile annotation degrades to "no annotation", never to a weaker policy. There are no legacy aliases: the old `policy`/`agent` keys, `reason` prose, and the `allow`/`confirm`/`block` and permission-mode names are ignored entirely.
+
+`costHint` is a signal, not a gate: like `destructive`, it never pauses execution by itself. It exists so the WebMCP client — never the page — can decide to prompt a human before calling an operation the publisher flagged as costly, exactly the way `destructiveHint` lets a client decide to prompt before an irreversible one.
 
 ### How a level is reached
 
@@ -244,6 +252,7 @@ Page `exposure: "write"`, untrusted document (`trustSpecAnnotations: false`):
 | `POST /billing/charges` | `tool: hidden` | `hidden` | absent everywhere |
 | `GET /reports/usage` | `tool: read, requiresAuth: bearerAuth` | `read` | only when bearerAuth is authorized, else `AUTH_REQUIRED` |
 | `DELETE /projects/{id}` | `tool: write, destructive: true` | `write` | yes, `destructiveHint: true` |
+| `POST /exports` | `tool: write, requiresAuth: waypointKey, costHint: "..."` | `write` | yes once authorized, `costHint: true` + `costNote` |
 
 With page `exposure: "read"`, every write above becomes held regardless of annotations, and no annotation can loosen them.
 

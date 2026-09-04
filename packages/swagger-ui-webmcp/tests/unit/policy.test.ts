@@ -3,6 +3,7 @@ import {
   authSatisfied,
   readAnnotation,
   readAuthGate,
+  readCostHint,
   resolvePolicy,
   tighterGate,
   toExposure,
@@ -42,6 +43,15 @@ describe('x-webmcp annotation parsing', () => {
     });
   });
 
+  it('reads costHint alongside the rest of the vocabulary', () => {
+    expect(readAnnotation({ tool: 'write', costHint: true })).toEqual({ tool: 'write', costHint: { flagged: true } });
+    expect(readAnnotation({ tool: 'write', costHint: '$0.02 per call' })).toEqual({
+      tool: 'write',
+      costHint: { flagged: true, note: '$0.02 per call' }
+    });
+    expect(readAnnotation({ destructive: true, costHint: true })).toEqual({ destructive: true, costHint: { flagged: true } });
+  });
+
   it('ignores every legacy key: policy, agent, reason, and old mode names', () => {
     expect(readAnnotation({ policy: 'deny' })).toBeUndefined();
     expect(readAnnotation({ policy: 'read-only' })).toBeUndefined();
@@ -54,9 +64,33 @@ describe('x-webmcp annotation parsing', () => {
     expect(readAnnotation({ tool: 'sometimes' })).toBeUndefined();
     expect(readAnnotation({ tool: 42 })).toBeUndefined();
     expect(readAnnotation({ destructive: 'yes' })).toBeUndefined();
+    expect(readAnnotation({ costHint: false })).toBeUndefined();
+    expect(readAnnotation({ costHint: 42 })).toBeUndefined();
+    expect(readAnnotation({ costHint: '' })).toBeUndefined();
+    expect(readAnnotation({ costHint: { amount: 2 } })).toBeUndefined();
     expect(readAnnotation('read')).toBeUndefined();
     expect(readAnnotation(['write'])).toBeUndefined();
     expect(readAnnotation(null)).toBeUndefined();
+  });
+});
+
+describe('costHint parsing', () => {
+  it('accepts true or a non-empty description string', () => {
+    expect(readCostHint(true)).toEqual({ flagged: true });
+    expect(readCostHint('Sends a real SMS to the customer')).toEqual({
+      flagged: true,
+      note: 'Sends a real SMS to the customer'
+    });
+  });
+
+  it('drops anything else rather than guessing', () => {
+    expect(readCostHint(false)).toBeUndefined();
+    expect(readCostHint('')).toBeUndefined();
+    expect(readCostHint(42)).toBeUndefined();
+    expect(readCostHint({ amount: 2 })).toBeUndefined();
+    expect(readCostHint(['costly'])).toBeUndefined();
+    expect(readCostHint(null)).toBeUndefined();
+    expect(readCostHint(undefined)).toBeUndefined();
   });
 });
 
@@ -270,5 +304,56 @@ describe('destructive operations', () => {
     expect(resolvePolicy({ pageExposure: 'write', documentDefault: { destructive: true }, ...write }).destructive).toBe(true);
     expect(resolvePolicy({ pageExposure: 'write', operation: { destructive: true }, ...write }).destructive).toBe(true);
     expect(resolvePolicy({ pageExposure: 'write', ...write }).destructive).toBe(false);
+  });
+});
+
+describe('cost hints', () => {
+  it('ORs the flag across document root, operation, and resolver, exactly like destructive', () => {
+    expect(
+      resolvePolicy({ pageExposure: 'write', documentDefault: { costHint: { flagged: true } }, ...write }).costHint
+    ).toEqual({ flagged: true });
+    expect(resolvePolicy({ pageExposure: 'write', operation: { costHint: { flagged: true } }, ...write }).costHint).toEqual({
+      flagged: true
+    });
+    expect(
+      resolvePolicy({ pageExposure: 'write', resolver: { costHint: { flagged: true } }, ...write }).costHint
+    ).toEqual({ flagged: true });
+    expect(resolvePolicy({ pageExposure: 'write', ...write }).costHint).toBeUndefined();
+  });
+
+  it('prefers the operation note over the document root note, and the root note over the resolver note', () => {
+    const opNote = resolvePolicy({
+      pageExposure: 'write',
+      documentDefault: { costHint: { flagged: true, note: 'root note' } },
+      operation: { costHint: { flagged: true, note: 'operation note' } },
+      resolver: { costHint: { flagged: true, note: 'resolver note' } },
+      ...write
+    }).costHint;
+    expect(opNote).toEqual({ flagged: true, note: 'operation note' });
+
+    const rootNote = resolvePolicy({
+      pageExposure: 'write',
+      documentDefault: { costHint: { flagged: true, note: 'root note' } },
+      resolver: { costHint: { flagged: true, note: 'resolver note' } },
+      ...write
+    }).costHint;
+    expect(rootNote).toEqual({ flagged: true, note: 'root note' });
+  });
+
+  it('lets a resolver-supplied note surface even when a bare `true` flagged it elsewhere', () => {
+    const policy = resolvePolicy({
+      pageExposure: 'write',
+      operation: { costHint: { flagged: true } },
+      resolver: { costHint: { flagged: true, note: 'resolver detail' } },
+      ...write
+    });
+    expect(policy.costHint).toEqual({ flagged: true, note: 'resolver detail' });
+  });
+
+  it('is not a capability restriction: a flagged operation still runs when otherwise exposed', () => {
+    const policy = resolvePolicy({ pageExposure: 'write', operation: { tool: 'write', costHint: { flagged: true } }, ...write });
+    expect(policy.blocked).toBe(false);
+    expect(policy.hidden).toBe(false);
+    expect(policy.exposure).toBe('write');
   });
 });

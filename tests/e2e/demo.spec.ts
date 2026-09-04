@@ -247,15 +247,26 @@ test.describe('WebMCP capability set', () => {
         read: pick('api.listProjects.').annotations,
         write: pick('api.createTask.').annotations,
         destructive: pick('api.deleteProject.').annotations,
+        costFlagged: pick('api.createExport.').annotations,
         batch: tools.get('openapi_execute_batch').annotations
       };
     });
 
-    expect(annotations.read).toEqual({ readOnlyHint: true, destructiveHint: false, untrustedContentHint: true });
-    expect(annotations.write).toEqual({ readOnlyHint: false, destructiveHint: false, untrustedContentHint: true });
+    expect(annotations.read).toEqual({ readOnlyHint: true, destructiveHint: false, costHint: false, untrustedContentHint: true });
+    expect(annotations.write).toEqual({ readOnlyHint: false, destructiveHint: false, costHint: false, untrustedContentHint: true });
     expect(annotations.destructive).toEqual({
       readOnlyHint: false,
       destructiveHint: true,
+      costHint: false,
+      untrustedContentHint: true
+    });
+    // `POST /exports` carries `x-webmcp.costHint` in the demo document: a
+    // real, callable write flagged as costly rather than hidden outright.
+    expect(annotations.costFlagged).toEqual({
+      readOnlyHint: false,
+      destructiveHint: false,
+      costHint: true,
+      costNote: 'Each export consumes metered processing minutes billed to the account. Confirm scope and format with a human before starting one.',
       untrustedContentHint: true
     });
     expect(annotations.batch).toMatchObject({ readOnlyHint: false, destructiveHint: true });

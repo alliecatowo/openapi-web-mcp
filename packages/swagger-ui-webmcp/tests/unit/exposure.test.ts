@@ -34,6 +34,12 @@ const SPEC = {
     },
     '/usage': {
       get: { operationId: 'getUsage', 'x-webmcp': { tool: 'read', requiresAuth: 'bearerAuth' } }
+    },
+    '/exports': {
+      post: {
+        operationId: 'createExport',
+        'x-webmcp': { tool: 'write', costHint: 'Bills the account per export' }
+      }
     }
   }
 };
@@ -174,6 +180,19 @@ describe('exposed operations run without any prompt', () => {
     expect(result.error.code).toBe('READ_ONLY_MODE');
     expect(swagger.requests).toHaveLength(0);
   });
+
+  it('runs a cost-flagged write once exposed; costHint is a signal, not a pause', async () => {
+    const { swagger, registry } = makeRegistry();
+    const result: any = await registry.execute({ operation: 'createExport' });
+    expect(result.ok).toBe(true);
+    expect(swagger.requests).toHaveLength(1);
+    expect((registry.get('createExport') as any).agentPolicy).toMatchObject({
+      exposure: 'write',
+      costHint: true,
+      costNote: 'Bills the account per export',
+      callable: true
+    });
+  });
 });
 
 describe('registration annotations', () => {
@@ -184,22 +203,41 @@ describe('registration annotations', () => {
 
   it('registers reads with readOnlyHint and without destructiveHint', () => {
     const annotations = definitionFor('GET /projects', gateFor()).annotations;
-    expect(annotations).toEqual({ readOnlyHint: true, destructiveHint: false, untrustedContentHint: true });
+    expect(annotations).toEqual({ readOnlyHint: true, destructiveHint: false, costHint: false, untrustedContentHint: true });
   });
 
   it('registers writes without readOnlyHint', () => {
     const annotations = definitionFor('POST /notes', gateFor()).annotations;
-    expect(annotations).toEqual({ readOnlyHint: false, destructiveHint: false, untrustedContentHint: true });
+    expect(annotations).toEqual({ readOnlyHint: false, destructiveHint: false, costHint: false, untrustedContentHint: true });
   });
 
   it('marks destructive writes with destructiveHint', () => {
     const annotations = definitionFor('DELETE /projects/{id}', gateFor()).annotations;
-    expect(annotations).toEqual({ readOnlyHint: false, destructiveHint: true, untrustedContentHint: true });
+    expect(annotations).toEqual({ readOnlyHint: false, destructiveHint: true, costHint: false, untrustedContentHint: true });
   });
 
   it('keeps correct annotations on auth-gated tools: the client gates the call', () => {
     const annotations = definitionFor('GET /usage', gateFor()).annotations;
-    expect(annotations).toEqual({ readOnlyHint: true, destructiveHint: false, untrustedContentHint: true });
+    expect(annotations).toEqual({ readOnlyHint: true, destructiveHint: false, costHint: false, untrustedContentHint: true });
+  });
+
+  it('marks cost-flagged writes with costHint and costNote', () => {
+    const annotations = definitionFor('POST /exports', gateFor()).annotations;
+    expect(annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: false,
+      costHint: true,
+      costNote: 'Bills the account per export',
+      untrustedContentHint: true
+    });
+  });
+
+  it('omits costNote when the publisher gave no description', () => {
+    const op = ops.find((candidate) => candidate.key === 'DELETE /projects/{id}')!;
+    const withBareCostHint = { ...op, documentAnnotation: undefined, annotation: { tool: 'write' as const, destructive: true, costHint: { flagged: true as const } } };
+    const annotations = operationDefinition({}, withBareCostHint, new AbortController().signal, () => gateFor()).annotations;
+    expect(annotations).toEqual({ readOnlyHint: false, destructiveHint: true, costHint: true, untrustedContentHint: true });
+    expect(annotations).not.toHaveProperty('costNote');
   });
 
   it('refuses a held write at execution time, fail closed on live policy changes', async () => {

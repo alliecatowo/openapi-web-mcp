@@ -510,9 +510,15 @@ paths:
       description: Returns 202 with a job id. Poll `getExport` until the status is `complete`. Needs the waypointKey header credential.
       security:
         - waypointKey: []
+      # Stays callable — unlike /billing/charges, which is hidden outright —
+      # but flagged with costHint: an export job consumes metered processing
+      # minutes billed to the account, so a WebMCP client may choose to
+      # confirm with a human before starting one, especially for a large
+      # scope. costHint is a signal only: the page never pauses to ask.
       x-webmcp:
         tool: write
         requiresAuth: waypointKey
+        costHint: Each export consumes metered processing minutes billed to the account. Confirm scope and format with a human before starting one.
       requestBody:
         required: true
         content:

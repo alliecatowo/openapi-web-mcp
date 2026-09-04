@@ -131,9 +131,10 @@ Then, by hand, do any of these and ask again — the agent adapts with no reconf
 - Switch the server dropdown to **Production** and ask for the projects again. Different data store, same tools.
 - Set `DELETE /projects/{projectId}` to **Read only** and ask the agent to delete a project. It gets a structured `LOCKED` error — then set it back and watch the same call succeed.
 - Ask the agent to charge the account $50. `POST /billing/charges` is `tool: hidden` — it is absent from the agent's capability set entirely, while you can still run it yourself in Try it out.
+- Ask the agent to start an export. `POST /exports` is `costHint`-flagged rather than hidden: the tool stays registered and callable (once `waypointKey` is authorized), but carries `costHint: true` and a `costNote` explaining it bills metered processing minutes — a client that reads annotations can choose to confirm with you first, unlike the flat refusal `hidden` gives.
 - Load the **Waypoint — no x-webmcp** document from the switcher, or paste any OpenAPI URL. The tool set is re-derived from whatever is loaded.
 
-The demo API is real and stateful, not a stub: 28 operations covering every HTTP method, path/query/header parameters, repeated array query parameters, cursor pagination, `If-Match` optimistic concurrency returning 409, an async 202 job with polling, a 207 multi-status bulk update, a multipart upload deliberately unsupported as a direct tool, two hidden operations, a write held at read, three `requiresAuth` gates across three scheme types, and deliberate 401/404/422 paths — with separate Sandbox and Production data stores.
+The demo API is real and stateful, not a stub: 28 operations covering every HTTP method, path/query/header parameters, repeated array query parameters, cursor pagination, `If-Match` optimistic concurrency returning 409, an async 202 job with polling, a 207 multi-status bulk update, a multipart upload deliberately unsupported as a direct tool, two hidden operations, a write held at read, a `costHint`-flagged write, three `requiresAuth` gates across three scheme types, and deliberate 401/404/422 paths — with separate Sandbox and Production data stores.
 
 **Sign in** is optional: it shares a browser session with the agent and shows in the audit log, but never blocks a call. Exactly three operations require authorization — they declare it in the document, so Swagger draws its padlock on them and nowhere else.
 
@@ -180,7 +181,7 @@ Driving someone else's store instead of owning one has real costs, and paying th
 
 Direct tools, the generic executor, and the batch executor all funnel through one `authorize` function evaluated at call time against live state, so there is exactly one place exposure is enforced. It composes page `exposure`, the document's `x-webmcp`, the page's `policyResolver`, and the human's session locks on the `hidden < read < write` lattice, then checks `requiresAuth` against Swagger UI's live authorized schemes. Nothing is cached: authorizing in Swagger UI, or changing a lock, flips the *next* call with no re-registration.
 
-**The page never prompts.** Permission UX belongs to the WebMCP client. The page's interface to the client is exactly three things: registration visibility, MCP annotations (`readOnlyHint`, `destructiveHint`, `untrustedContentHint`), and structured errors (`AUTH_REQUIRED`, `LOCKED`, `OPERATION_DENIED`, `READ_ONLY_MODE`).
+**The page never prompts.** Permission UX belongs to the WebMCP client. The page's interface to the client is exactly three things: registration visibility, MCP annotations (`readOnlyHint`, `destructiveHint`, `costHint`, `untrustedContentHint`), and structured errors (`AUTH_REQUIRED`, `LOCKED`, `OPERATION_DENIED`, `READ_ONLY_MODE`).
 
 An earlier version of this plugin shipped a full in-page consent system — a shadow-DOM console, consent cards showing argument JSON, allow-once/allow-always. It was deleted. A page that prompts is a second policy engine competing with the client's, and the page's has less context.
 
@@ -230,11 +231,15 @@ paths:
   /billing/charges:
     post:
       x-webmcp: { tool: hidden }
+  /exports:
+    post:
+      x-webmcp: { tool: write, requiresAuth: waypointKey, costHint: "Each export consumes metered processing minutes billed to the account" }
 ```
 
 - `tool` — `read`, `write`, or `hidden`. What the operation *is* for agents.
 - `requiresAuth` — `true`, a scheme name, or a list (several names mean ANY of them, mirroring OpenAPI `security` alternatives). The operation stays SEE-able but is not CALL-able until Swagger UI's live auth state satisfies it; an early call returns `AUTH_REQUIRED`, and authorizing in the normal dialog makes the same call succeed.
 - `destructive` — surfaces as `destructiveHint` so the client can gate the invocation. It never prompts anyone by itself.
+- `costHint` — `true`, or a string describing the cost or consequence. Surfaces as `costHint: true` plus a `costNote` string (when given) on the registered tool, so a client can choose to confirm with a human before calling an operation that costs money or has a real-world side effect, the same way `destructiveHint` lets it gate an irreversible one. It never prompts anyone by itself, and it never blocks the call — a publisher who wants the call blocked reaches for `tool: read` or `requiresAuth`, not `costHint`.
 
 There are no consent keys and no legacy aliases; the old vocabulary named prompting behaviour, and keeping aliases would let a copied annotation silently mean something its author never intended.
 

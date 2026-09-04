@@ -137,6 +137,8 @@ export class WebMcpRegistry {
       exposure: policy.exposure,
       readOnly: op.readOnly,
       destructive: policy.destructive,
+      costHint: policy.costHint !== undefined,
+      costNote: policy.costHint?.note ?? null,
       callable: !policy.hidden && !policy.blocked && !(policy.locked && policy.lock === 'view') && authorized,
       requiresAuth: policy.requiresAuth
         ? policy.requiresAuth.any

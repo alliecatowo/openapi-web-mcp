@@ -10,6 +10,7 @@
  *   tool: read | write | hidden
  *   requiresAuth: true | bearerAuth | [bearerAuth, waypointKey]
  *   destructive: true
+ *   costHint: true | "Bills the account $0.02 per call"
  * ```
  *
  * - `tool` states what the operation is for agents: a READ tool, a WRITE tool,
@@ -23,6 +24,14 @@
  *   Several names mean ANY of them (mirroring OpenAPI `security` alternatives).
  * - `destructive` marks an irreversible operation. It becomes
  *   `destructiveHint` on the registered tool so the WebMCP client can gate it.
+ * - `costHint` marks an operation that costs money or otherwise has a real
+ *   consequence beyond the API call itself — a metered charge, a real SMS
+ *   sent, a third party notified. It becomes `costHint: true` plus, when the
+ *   publisher gave one, a `costNote` string on the registered tool, so a
+ *   WebMCP client can choose to confirm with a human before calling an
+ *   operation the publisher flagged as costly, the same way `destructive`
+ *   flags one as irreversible. Like `destructive`, it is a signal only: the
+ *   page never pauses for a prompt, and calling stays otherwise unblocked.
  *
  * Two sources describe the level:
  *
@@ -65,11 +74,23 @@ export interface AuthGate {
   schemes: string[];
 }
 
+/**
+ * A cost/consequence flag declared by `x-webmcp.costHint`. `flagged` is
+ * always `true` when present — there is no "unflagged" instance, mirroring
+ * how `destructive` is only ever `true` or absent. `note` carries the
+ * publisher's optional description of the cost or consequence.
+ */
+export interface CostHint {
+  flagged: true;
+  note?: string;
+}
+
 /** The publisher policy object: the shape of `x-webmcp` after parsing. */
 export interface SpecAnnotation {
   tool?: ToolExposure;
   requiresAuth?: AuthGate;
   destructive?: boolean;
+  costHint?: CostHint;
 }
 
 /**
@@ -109,6 +130,20 @@ export function readAuthGate(value: unknown): AuthGate | undefined {
 }
 
 /**
+ * Parse `x-webmcp.costHint`: `true` (flag the operation as costly or
+ * consequential, with no further detail) or a non-empty string describing
+ * the cost or consequence (e.g. `"$0.02 per call"` or `"Sends a real SMS to
+ * the customer"`). Anything else — `false`, a number, an object, an empty
+ * string — is dropped rather than guessed at, exactly like `readAuthGate`
+ * and `readAnnotation` drop values they do not recognise.
+ */
+export function readCostHint(value: unknown): CostHint | undefined {
+  if (value === true) return { flagged: true };
+  if (typeof value === 'string') return value.length ? { flagged: true, note: value } : undefined;
+  return undefined;
+}
+
+/**
  * Read an `x-webmcp` object, keeping only values this version understands.
  * Anything unrecognised is dropped rather than guessed at, so a malformed or
  * hostile annotation degrades to "no annotation" instead of a weaker policy.
@@ -125,6 +160,8 @@ export function readAnnotation(node: unknown): SpecAnnotation | undefined {
   const requiresAuth = readAuthGate(raw.requiresAuth);
   if (requiresAuth) annotation.requiresAuth = requiresAuth;
   if (raw.destructive === true) annotation.destructive = true;
+  const costHint = readCostHint(raw.costHint);
+  if (costHint) annotation.costHint = costHint;
 
   return Object.keys(annotation).length ? annotation : undefined;
 }
@@ -153,6 +190,8 @@ export interface ResolvedPolicy {
   /** Effective authorization gate: every listed scheme group must hold. */
   requiresAuth?: AuthGate;
   destructive: boolean;
+  /** Cost/consequence flag, OR-ed across document root, operation and resolver. */
+  costHint?: CostHint;
   /** Which source produced the level, for context reporting and tests. */
   source: 'page' | 'document';
   /**
@@ -232,12 +271,23 @@ export function resolvePolicy(inputs: PolicyInputs): ResolvedPolicy {
   const documentGate = operation?.requiresAuth ?? documentDefault?.requiresAuth;
   const requiresAuth = tighterGate(documentGate, resolver?.requiresAuth);
 
+  // Same OR composition as `destructive`: any source can flag the cost, none
+  // can clear it. The note prefers the most specific source that set one —
+  // operation, then document root, then resolver — independent of which
+  // source actually flagged it, so a generic `costHint: true` at the root can
+  // still pick up a resolver's more specific note.
+  const costFlagged =
+    operation?.costHint?.flagged === true || documentDefault?.costHint?.flagged === true || resolver?.costHint?.flagged === true;
+  const costNote = operation?.costHint?.note ?? documentDefault?.costHint?.note ?? resolver?.costHint?.note;
+  const costHint: CostHint | undefined = costFlagged ? { flagged: true, ...(costNote ? { note: costNote } : {}) } : undefined;
+
   return {
     exposure,
     hidden: exposure === 'hidden',
     blocked: !readOnly && exposure === 'read',
     requiresAuth,
     destructive: operation?.destructive === true || documentDefault?.destructive === true || resolver?.destructive === true,
+    costHint,
     source
   };
 }

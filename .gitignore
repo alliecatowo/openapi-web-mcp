@@ -12,3 +12,5 @@ test-results/
 
 # Derived at build time from apps/demo/public/openapi.yaml
 apps/demo/public/openapi-unannotated.yaml
+.vercel
+.env*

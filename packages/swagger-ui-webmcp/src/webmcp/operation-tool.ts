@@ -10,8 +10,10 @@ import { authorize, operationLabel, policyFor, type GateContext } from './gate.j
  *
  * Annotations are the publisher's permission statement to the WebMCP client:
  * reads carry `readOnlyHint: true`, writes carry no `readOnlyHint` and gain
- * `destructiveHint: true` when the publisher marked them destructive. The
- * client decides what to ask a person; the page never does.
+ * `destructiveHint: true` when the publisher marked them destructive, and
+ * `costHint: true` (plus a `costNote` string, when the publisher gave one)
+ * when the publisher marked them costly or consequential. The client decides
+ * what to ask a person; the page never does.
  */
 export function operationDefinition(
   system: any,
@@ -19,6 +21,7 @@ export function operationDefinition(
   signal: AbortSignal,
   gate: () => GateContext
 ) {
+  const policy = policyFor(op, gate());
   return {
     name: op.toolName,
     title: op.displayTitle,
@@ -28,7 +31,9 @@ export function operationDefinition(
     inputSchema: op.inputSchema,
     annotations: {
       readOnlyHint: op.readOnly,
-      destructiveHint: policyFor(op, gate()).destructive,
+      destructiveHint: policy.destructive,
+      costHint: policy.costHint !== undefined,
+      ...(policy.costHint?.note ? { costNote: policy.costHint.note } : {}),
       untrustedContentHint: true
     },
     execute: async (input: any, callCtx: any = {}) => {
