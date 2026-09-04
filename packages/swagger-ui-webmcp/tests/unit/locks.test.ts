@@ -211,6 +211,34 @@ describe('lock changes re-derive the tool set through the normal generation', ()
     expect(swagger.requests).toHaveLength(0);
   });
 
+  it('a lock applied mid-batch stops the next step, not just ones present when the batch started', async () => {
+    // authorizeBatch() only checks once, up front, before anything executes.
+    // A person can lock (or de-authorize) an operation while an earlier step
+    // in the same batch is still in flight — real time, since a single step
+    // can wait up to RESPONSE_TIMEOUT_MS for a response. Each step must be
+    // re-checked against live state right before it runs, the same way the
+    // single-operation execute() path always has been.
+    const { locks, swagger, registry } = makeRegistry();
+    const originalExecute = swagger.system.specActions.execute;
+    swagger.system.specActions.execute = (args: any) => {
+      const result = originalExecute(args);
+      // Simulate a person locking the second step the instant the first one
+      // fires — nothing about this was true when authorizeBatch() ran.
+      if (args.path === '/projects' && args.method === 'post') {
+        locks.set('GET /projects', 'view');
+      }
+      return result;
+    };
+    const result: any = await registry.batch({
+      steps: [{ operation: 'createProject', query: { verbose: '1' } }, { operation: 'listProjects' }]
+    });
+    expect(swagger.requests).toHaveLength(1);
+    expect(swagger.requests[0].method).toBe('post');
+    expect(result.results[0].ok).toBe(true);
+    expect(result.results[1].ok).toBe(false);
+    expect(result.results[1].error.code).toBe('LOCKED');
+  });
+
   it('re-registering a generation never drops tools whose names did not change', () => {
     const { tools } = installWebMcpShim();
     const { locks, registry } = makeRegistry();

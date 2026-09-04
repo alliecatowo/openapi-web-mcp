@@ -379,6 +379,18 @@ export class WebMcpRegistry {
         results.push({ index, operation: operationLabel(step.op), ok: false, error: { code: 'ABORTED', message: 'The batch was aborted.' } });
         break;
       }
+      // Re-checked per step, not just once up front: a single step can wait up
+      // to RESPONSE_TIMEOUT_MS (2 minutes) for a response, real time in which a
+      // person can revoke a scheme or lock an operation in Swagger UI. The
+      // up-front authorizeBatch() call still exists so a batch fails fast
+      // before touching the API at all; this catches a mid-batch revocation
+      // the same way the single-operation execute() path always has.
+      const recheck = authorize(step.op, this.gate);
+      if (!recheck.ok) {
+        results.push({ index, operation: operationLabel(step.op), ...recheck.error });
+        if (stopOnError) break;
+        continue;
+      }
       const result = await executeOperation(this.system, step.op, step.input, signal);
       results.push({ index, operation: operationLabel(step.op), ...result });
       if (!result.ok && stopOnError) break;
