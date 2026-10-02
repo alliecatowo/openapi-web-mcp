@@ -14,3 +14,7 @@ test-results/
 apps/demo/public/openapi-unannotated.yaml
 .vercel
 .env*
+
+*.log
+!.env.example
+.mcp.json

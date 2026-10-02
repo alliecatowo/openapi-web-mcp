@@ -142,7 +142,7 @@ Demo credentials (nothing real is protected by them): `bearerAuth` → `waypoint
 
 ## How WebMCP is implemented
 
-The plugin registers tools on `document.modelContext` when the browser provides it, and does nothing at all when it doesn't — Swagger UI is untouched and fully usable either way. There is no production polyfill.
+The plugin registers tools on `document.modelContext` when the browser provides it, and registers no tools when it doesn't. Swagger UI stays fully usable either way, but the plugin's lock-select control is added to each operation even without `document.modelContext`. There is no production polyfill.
 
 ```ts
 import SwaggerUI from "swagger-ui";
@@ -156,6 +156,8 @@ SwaggerUI({
   webMcp: { exposure: "write" }
 });
 ```
+
+`swagger-ui-webmcp` is not published to npm yet; this import resolves through the workspace in this repo.
 
 The plugin peers with `swagger-ui >=5.32.0 <5.33.0` and is tested against 5.32.14.
 
