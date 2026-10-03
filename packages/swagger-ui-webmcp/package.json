@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Swagger UI plugin that exposes a documented API to in-browser agents as WebMCP tools, inheriting the page's login and environment.",
   "license": "Apache-2.0",
-  "author": "Allison Coleman <allisonemilycoleman@gmail.com>",
+  "author": "Allison Coleman <me@allisons.dev>",
   "homepage": "https://github.com/alliecatowo/openapi-web-mcp#readme",
   "repository": {
     "type": "git",
