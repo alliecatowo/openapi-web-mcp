@@ -1,21 +1,21 @@
 # Swagger UI WebMCP
 
 <p align="center">
-  <img src="docs/media/hero.gif" alt="An agent attempts to delete a project while the operation is locked to read-only in Swagger UI; the agent's own chat panel reports that the delete tool was withheld and no request was sent." width="800">
+  <img src="https://raw.githubusercontent.com/alliecatowo/openapi-web-mcp/main/docs/media/hero.gif" alt="An agent attempts to delete a project while the operation is locked to read-only in Swagger UI; the agent's own chat panel reports that the delete tool was withheld and no request was sent." width="800">
 </p>
 
 <table align="center">
 <tr>
 <td width="33%" align="center">
-<img src="docs/media/screenshot-1.png" alt="Swagger UI operation panel for DELETE /projects/{projectId} with an Agent access dropdown set to Read only, right next to the Try it out button." width="100%"><br>
+<img src="https://raw.githubusercontent.com/alliecatowo/openapi-web-mcp/main/docs/media/screenshot-1.png" alt="Swagger UI operation panel for DELETE /projects/{projectId} with an Agent access dropdown set to Read only, right next to the Try it out button." width="100%"><br>
 <sub>Per-operation access control, set live next to <strong>Try it out</strong>.</sub>
 </td>
 <td width="33%" align="center">
-<img src="docs/media/screenshot-2.png" alt="Agent chat panel refusing to list projects because the page owner set GET /projects to Hidden for agents." width="100%"><br>
+<img src="https://raw.githubusercontent.com/alliecatowo/openapi-web-mcp/main/docs/media/screenshot-2.png" alt="Agent chat panel refusing to list projects because the page owner set GET /projects to Hidden for agents." width="100%"><br>
 <sub>A structural refusal — hidden operations don't exist for the agent.</sub>
 </td>
 <td width="33%" align="center">
-<img src="docs/media/screenshot-3.png" alt="Agent chat panel proposing an archive-then-delete plan and pausing for confirmation, next to Swagger UI's own live response panel." width="100%"><br>
+<img src="https://raw.githubusercontent.com/alliecatowo/openapi-web-mcp/main/docs/media/screenshot-3.png" alt="Agent chat panel proposing an archive-then-delete plan and pausing for confirmation, next to Swagger UI's own live response panel." width="100%"><br>
 <sub>The agent proposes, pauses, and answers land in Swagger's own panel.</sub>
 </td>
 </tr>
