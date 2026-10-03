@@ -30,7 +30,7 @@
     "provenance": true
   },
   "peerDependencies": {
-    "swagger-ui": ">=5.32.0 <5.33.0",
+    "swagger-ui": ">=5.32.0 <5.34.0",
     "react": ">=18 <20"
   },
   "scripts": {
