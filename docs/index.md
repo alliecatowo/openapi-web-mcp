@@ -5,7 +5,7 @@ pageClass: ow-page
 sidebar: false
 ---
 
-<h1><span class="ow-prompt">$</span> If you can Try it out, your agent can too.</h1>
+<h1>If you can Try it out, your agent can too.</h1>
 <p class="ow-lede">A Swagger UI plugin that turns an OpenAPI docs page into a session-scoped tool set for browser agents. The agent calls the API through the login, server and request pipeline you already have open. No MCP server, no AI SDK, no token copied anywhere.</p>
 <div class="ow-actions">
   <a class="ow-primary" href="https://openapi-web-mcp.vercel.app">try the live demo</a>
@@ -54,18 +54,30 @@ This is the deployed demo, a stateful Waypoint project-tracker API with Sandbox 
 ## what you get
 
 <dl class="ow-facts">
+  <div>
   <dt>the page is the integration</dt>
   <dd>Tools are derived from the loaded OpenAPI document and run through Swagger UI's own <code>specActions.execute</code>, so login, selected server and interceptors are inherited.</dd>
+  </div>
+  <div>
   <dt>four parties, one lattice</dt>
   <dd>API publisher (<code>x-webmcp</code>), page owner, the person at the page, and the WebMCP client each narrow access. Levels are <code>hidden &lt; read &lt; write</code>; the tightest wins.</dd>
+  </div>
+  <div>
   <dt>live per-operation locks</dt>
   <dd>A dropdown next to Try it out sets Full access, Read only or Hidden for this tab. It resets on reload, and no tool input can change it.</dd>
+  </div>
+  <div>
   <dt>untrusted specs stay untrusted</dt>
   <dd>A spec can hide or hold operations at read, but cannot talk a read-only page into writes. Malformed annotations are dropped, not guessed at.</dd>
+  </div>
+  <div>
   <dt>same panel, agent and human</dt>
   <dd>Agent calls render in Swagger's normal response panels, so you can compare what the agent sent with what you would have sent.</dd>
+  </div>
+  <div>
   <dt>audit hint</dt>
   <dd>The exported <code>agentExecution</code> lets a page's request interceptor tag agent traffic. It is a hint, not an identity proof.</dd>
+  </div>
 </dl>
 
 ## docs
