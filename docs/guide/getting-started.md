@@ -6,7 +6,7 @@
 npm install swagger-ui-webmcp
 ```
 
-Published on npm as [`swagger-ui-webmcp`](https://www.npmjs.com/package/swagger-ui-webmcp) (latest 0.1.1). Peers: `swagger-ui >=5.32.0 <5.33.0` (tested against 5.32.14) and `react >=18 <20`.
+Published on npm as [`swagger-ui-webmcp`](https://www.npmjs.com/package/swagger-ui-webmcp) (latest 0.1.0). Peers: `swagger-ui >=5.32.0 <5.34.0` (tested against 5.33.1) and `react >=18 <20`.
 
 ## Use
 
