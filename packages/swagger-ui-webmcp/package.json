@@ -1,3 +1,40 @@
 {
-  "name":"swagger-ui-webmcp","version":"0.1.0","type":"module","main":"dist/index.js","module":"dist/index.js","types":"dist/index.d.ts","files":["dist"],"peerDependencies":{"swagger-ui":">=5.32.0 <5.33.0","react":">=18 <20"},"scripts":{"build":"tsc -p tsconfig.json"}
+  "name": "swagger-ui-webmcp",
+  "version": "0.1.0",
+  "description": "Swagger UI plugin that exposes a documented API to in-browser agents as WebMCP tools, inheriting the page's login and environment.",
+  "license": "Apache-2.0",
+  "author": "Allison Coleman <allisonemilycoleman@gmail.com>",
+  "homepage": "https://github.com/alliecatowo/openapi-web-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alliecatowo/openapi-web-mcp.git",
+    "directory": "packages/swagger-ui-webmcp"
+  },
+  "bugs": "https://github.com/alliecatowo/openapi-web-mcp/issues",
+  "keywords": ["swagger-ui", "openapi", "webmcp", "mcp", "agents", "plugin"],
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "files": ["dist", "README.md", "LICENSE", "NOTICE"],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "peerDependencies": {
+    "swagger-ui": ">=5.32.0 <5.33.0",
+    "react": ">=18 <20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "node ../../scripts/copy-package-docs.mjs"
+  }
 }
