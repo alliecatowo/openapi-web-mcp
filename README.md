@@ -1,5 +1,7 @@
 # Swagger UI WebMCP
 
+**[Docs](https://alliecatowo.github.io/openapi-web-mcp/)** · [Live demo](https://openapi-web-mcp.vercel.app) · [npm](https://www.npmjs.com/package/swagger-ui-webmcp)
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/alliecatowo/openapi-web-mcp/main/docs/media/hero.gif" alt="An agent attempts to delete a project while the operation is locked to read-only in Swagger UI; the agent's own chat panel reports that the delete tool was withheld and no request was sent." width="800">
 </p>

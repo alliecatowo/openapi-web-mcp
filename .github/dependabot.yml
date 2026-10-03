@@ -32,3 +32,7 @@ updates:
     update-types: [version-update:semver-major]
   - dependency-name: "@types/react-dom"
     update-types: [version-update:semver-major]
+- package-ecosystem: npm
+  directory: /docs
+  schedule:
+    interval: weekly
