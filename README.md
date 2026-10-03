@@ -157,7 +157,7 @@ SwaggerUI({
 });
 ```
 
-`swagger-ui-webmcp` is not published to npm yet; this import resolves through the workspace in this repo.
+Install with `npm install swagger-ui-webmcp` (peers: `swagger-ui`, `react`).
 
 The plugin peers with `swagger-ui >=5.32.0 <5.33.0` and is tested against 5.32.14.
 

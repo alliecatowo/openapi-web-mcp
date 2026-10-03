@@ -18,3 +18,6 @@ apps/demo/public/openapi-unannotated.yaml
 *.log
 !.env.example
 .mcp.json
+packages/*/README.md
+packages/*/LICENSE
+packages/*/NOTICE
