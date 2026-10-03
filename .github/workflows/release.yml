@@ -36,8 +36,12 @@ jobs:
       # Trusted publishing (OIDC) needs npm >= 11.5.1; Node's bundled npm is older.
       - name: Upgrade npm for trusted publishing
         run: npm install -g npm@latest && npm --version
+      # Publish from the package directory: npm's OIDC token exchange reads the package
+      # name from the cwd's package.json, so `-w` from the root asks for a token for the
+      # private root package and the PUT 404s.
       - name: Publish to npm
-        run: npm publish -w swagger-ui-webmcp --provenance --access public
+        working-directory: packages/swagger-ui-webmcp
+        run: npm publish --provenance --access public
 
   github-release:
     needs: publish

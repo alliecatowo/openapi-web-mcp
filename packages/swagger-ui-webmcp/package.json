@@ -1,6 +1,6 @@
 {
   "name": "swagger-ui-webmcp",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Swagger UI plugin that exposes a documented API to in-browser agents as WebMCP tools, inheriting the page's login and environment.",
   "license": "Apache-2.0",
   "author": "Allison Coleman <me@allisons.dev>",
