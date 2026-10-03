@@ -12,5 +12,10 @@
     "vite.config.ts",
     "../../api",
     "../../tests"
+  ],
+  "references": [
+    {
+      "path": "../../packages/swagger-ui-webmcp"
+    }
   ]
 }
