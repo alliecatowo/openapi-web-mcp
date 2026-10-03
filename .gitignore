@@ -21,3 +21,7 @@ apps/demo/public/openapi-unannotated.yaml
 packages/*/README.md
 packages/*/LICENSE
 packages/*/NOTICE
+
+# VitePress
+docs/.vitepress/cache/
+docs/.vitepress/dist/
