@@ -161,7 +161,7 @@ SwaggerUI({
 
 Install with `npm install swagger-ui-webmcp` (peers: `swagger-ui`, `react`).
 
-The plugin peers with `swagger-ui >=5.32.0 <5.33.0` and is tested against 5.32.14.
+The plugin peers with `swagger-ui >=5.32.0 <5.34.0` (verified on 5.32.14 and 5.33.1, React 18) and is tested against 5.33.1.
 
 ### Registration
 
@@ -252,7 +252,7 @@ There are no consent keys and no legacy aliases; the old vocabulary named prompt
 ## Architecture
 
 ```
-apps/demo/            Waypoint demo page: Swagger UI 5.32.14 + the plugin, document switcher
+apps/demo/            Waypoint demo page: Swagger UI 5.33.1 + the plugin, document switcher
 packages/swagger-ui-webmcp/       ~2,100 lines
   openapi/            enumerate · local $ref resolution · schema compilation · sanitize · generation hash
   policy/             the hidden<read<write lattice; x-webmcp parsing; session locks; composition
@@ -318,7 +318,7 @@ CI runs all four on every push.
 
 ## Provenance
 
-Built from scratch for the OpenAI WebMCP Challenge during the submission period (25 August – 3 September 2026). There is no pre-existing project: the repository's entire git history falls inside the window, and every line of the plugin, the demo API, the tests, and the documentation was written for this challenge. No forks of Swagger UI; it is consumed as an unmodified pinned dependency (5.32.14).
+Built from scratch for the OpenAI WebMCP Challenge during the submission period (25 August – 3 September 2026). There is no pre-existing project: the repository's entire git history falls inside the window, and every line of the plugin, the demo API, the tests, and the documentation was written for this challenge. No forks of Swagger UI; it is consumed as an unmodified pinned dependency (5.33.1).
 
 ## License
 

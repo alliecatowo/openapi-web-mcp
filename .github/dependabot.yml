@@ -21,6 +21,17 @@ updates:
       update-types:
       - minor
       - patch
+  # blocked-upstream: swagger-ui 5.x calls ReactDOM.render, removed in React 19
+  # (verified: the demo crashes with react 19.3). Revisit when swagger-ui supports React 19.
+  ignore:
+  - dependency-name: react
+    update-types: [version-update:semver-major]
+  - dependency-name: react-dom
+    update-types: [version-update:semver-major]
+  - dependency-name: "@types/react"
+    update-types: [version-update:semver-major]
+  - dependency-name: "@types/react-dom"
+    update-types: [version-update:semver-major]
 - package-ecosystem: npm
   directory: /docs
   schedule:

@@ -3,7 +3,8 @@
   "compilerOptions": {
     "noEmit": true,
     "types": [
-      "node"
+      "node",
+      "vite/client"
     ]
   },
   "include": [
@@ -11,5 +12,10 @@
     "vite.config.ts",
     "../../api",
     "../../tests"
+  ],
+  "references": [
+    {
+      "path": "../../packages/swagger-ui-webmcp"
+    }
   ]
 }
