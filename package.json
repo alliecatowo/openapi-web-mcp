@@ -15,19 +15,19 @@
     "dev": "npm run dev -w demo"
   },
   "devDependencies": {
-    "@playwright/test": "^1.52.0",
-    "@types/node": "^26.6.3",
+    "@playwright/test": "^1.64.0",
+    "@types/node": "^26.6.5",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
     "@types/swagger-ui": "^5.32.0",
     "typescript": "^7.0.2",
-    "vite": "^8.3.3",
-    "vitest": "^5.0.3"
+    "vite": "^8.3.4",
+    "vitest": "^5.0.4"
   },
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "swagger-ui": "5.33.1"
+    "swagger-ui": "5.33.2"
   },
   "overrides": {
     "swagger-ui": {
